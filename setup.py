@@ -9,7 +9,8 @@ setup(
         "jax",
         "fabric",
         "equinox",
-        "optax"
+        "optax",
+        "google-cloud-storage"
     ],
     extras_require={
         'test': ['pytest']

@@ -2,6 +2,7 @@ import random
 import string
 import signal
 from contextlib import contextmanager
+from google.cloud import storage
 
 ID_LEN = 16
 
@@ -27,3 +28,24 @@ def timeout(time):
 def raise_timeout(signum, frame):
     raise TimeoutError
 
+
+
+class GCPStorageClient:
+    def __init__(self, credentials_path):
+        self.client = storage.Client.from_service_account_json(credentials_path)
+
+    def read_from_gcs(self, bucket_name, file_path):
+        try:
+            bucket = self.client.bucket(bucket_name)
+            blob = bucket.blob(file_path)
+            return blob.download_as_bytes()
+        except Exception as e:
+            return f"An error occurred: {e}"
+
+    def write_to_gcs(self, bucket_name, file_path, data):
+        try:
+            bucket = self.client.bucket(bucket_name)
+            blob = bucket.blob(file_path)
+            blob.upload_from_string(data)
+        except Exception as e:
+            return f"An error occurred: {e}"
