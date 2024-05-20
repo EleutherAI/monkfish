@@ -38,7 +38,8 @@ def test_contiguous_video(data_loader):
         for _ in range(2):  # Fetch 2 video datasets
             video_data = data_loader.get_data()
             if video_data is not None:
-                description, frames = video_data
+                print(type(video_data))
+                frames, description = video_data
                 print(f"Video Description: {description}, Frames Shape: {frames.shape}")
             else:
                 print("No video data returned.")
@@ -47,11 +48,12 @@ def test_contiguous_video(data_loader):
 
 def main():
     # Initialize paths and credentials
-    credentials_path = '../../service-account-key.json'
-    bucket_name = 'your-bucket-name'  # Replace with your actual bucket name
-    upload_folder_path = '../../dataset'
-    metadata_path = '../../dataset/descriptions.json'
+    credentials_path = 'service-account-key.json'
+    bucket_name = 'lvd_data'  # Replace with your actual bucket name
+    upload_folder_path = 'dataset'
+    metadata_path = 'dataset/descriptions.json'
 
+    """
     # Initialize VideoUploader
     uploader = gdl.VideoUploader(credentials_path, bucket_name, upload_folder_path, metadata_path)
 
@@ -60,6 +62,7 @@ def main():
 
     # Upload new test data
     upload_test_data(uploader)
+    """
 
     # Initialize VideoDataLoader
     target_resolution = (720, 1280)  # Example target resolution
@@ -68,10 +71,14 @@ def main():
     # Test random frame mode
     test_random_frame(data_loader)
 
+
+    """
     # Test contiguous video mode
     test_contiguous_video(data_loader)
+    """
 
     print("All tests completed successfully.")
+
 
 if __name__ == "__main__":
     main()

@@ -166,4 +166,8 @@ cython_debug/
 service-account-key.json
 dataset/
 
+#vim stuff
+*.swp
+*.swo
+
 

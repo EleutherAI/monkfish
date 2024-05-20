@@ -4,9 +4,9 @@ import jax
 import jax.numpy as jnp
 import optax
 
-import latentvideodiffusion as lvd
-import latentvideodiffusion.models.frame_vae as frame_vae
-import latentvideodiffusion.frame_extractor
+import catfish.lvd
+import catfish.lvd.models.frame_vae as frame_vae
+import catfish.lvd.frame_extractor
 
 #Gaussian VAE primitives
 def gaussian_kl_divergence(p, q):

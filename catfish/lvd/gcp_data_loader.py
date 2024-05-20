@@ -9,18 +9,15 @@ from threading import Thread
 import google.cloud.storage as gcs
 
 class VideoDataLoader:
-    def __init__(self, credentials_path, bucket_name, upload_folder_path, target_resolution=(720, 1280), metadata_path=None, pkl_folder_path="processed_videos"):
+    def __init__(self, credentials_path, bucket_name, upload_folder_path, target_resolution=(144, 256), metadata_path=None, pkl_folder_path="processed_videos"):
         self.client = gcs.Client.from_service_account_json(credentials_path)
         self.bucket = self.client.bucket(bucket_name)
         self.upload_folder_path = upload_folder_path
         self.pkl_folder_path = pkl_folder_path
-        self.queue = Queue(maxsize=10)
+        self.queue = Queue(maxsize=3)
         self.workers = []
         self.active = True
         self.target_resolution = target_resolution
-        self.metadata_path = metadata_path
-        with open(metadata_path, 'r') as f:
-            self.metadata = json.load(f)
     
     def __enter__(self):
         return self
@@ -41,63 +38,81 @@ class VideoDataLoader:
         for worker in self.workers:
             worker.start()
 
-    def _download_video(self):
-        """Simulate downloading a random video file safely."""
+    def _download_video(self, temp_local_filename):
+        """Download a random .mp4 video file safely into a given file path and return both the file path and the original video file name."""
         try:
-            blobs = list(self.bucket.list_blobs(prefix="path/to/videos"))
-            if blobs:
-                blob = np.random.choice(blobs)
-                _, temp_local_filename = tempfile.mkstemp()
-                try:
-                    blob.download_to_filename(temp_local_filename)
-                    return temp_local_filename
-                except Exception as e:
-                    print(f"Failed to download video: {e}")
-                    return None
-                finally:
-                    os.unlink(temp_local_filename)  # Ensure cleanup happens
+            blobs = list(self.bucket.list_blobs())
+            mp4_blobs = [blob for blob in blobs if blob.name.endswith('.mp4')]
+            if mp4_blobs:
+                blob = np.random.choice(mp4_blobs)
+                blob.download_to_filename(temp_local_filename)
+                return temp_local_filename, blob.name  # Return the path and the original video name
         except Exception as e:
-            print(f"Error accessing blobs: {e}")
-            return None
+            print(f"Failed to download video: {e}")
+            return None, None
 
+    
     def _resize_frame(self, frame):
         """Resize the frame to the target resolution."""
         return cv2.resize(frame, self.target_resolution)
 
     def _worker_random_frame(self):
         while self.active:
-            video_path = self._download_video()
-            if video_path:
-                cap = cv2.VideoCapture(video_path)
-                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                random_frame_index = np.random.randint(0, frame_count)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_index)
-                ret, frame = cap.read()
-                if ret:
-                    resized_frame = self._resize_frame(frame)
-                    self.queue.put(np.array(resized_frame))
-                cap.release()
-                os.unlink(video_path)  # Clean up the temporary file
+            with tempfile.NamedTemporaryFile() as tmp_file:
+                temp_local_filename = tmp_file.name
+                video_path, video_name = self._download_video(temp_local_filename)  # This now unpacks both returned values
+                if video_path:  # Ensure video_path is not None
+                    cap = cv2.VideoCapture(video_path)
+                    if not cap.isOpened():
+                        print(f"Failed to open video: {video_path}")
+                        continue  # Continue to the next iteration
+
+                    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    if frame_count > 0:
+                        random_frame_index = np.random.randint(0, frame_count)
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_index)
+                        ret, frame = cap.read()
+                        if ret:
+                            resized_frame = self._resize_frame(frame)
+                            self.queue.put(np.array(resized_frame))
+                    else:
+                        print(f"No frames available in video: {video_path}")
+                    
+                    cap.release()
+
+    def _fetch_video_description(self, video_file):
+        """Fetch the description from a JSON file associated with the video."""
+        metadata_file = video_file + '.json'
+        blob = self.bucket.blob(metadata_file)
+        try:
+            json_data = blob.download_as_string()
+            metadata = json.loads(json_data)
+            return metadata.get('description', 'No description available')
+        except Exception as e:
+            print(f"Failed to download or parse metadata for {video_file}: {e}")
+            return 'No description available'
 
     def _worker_contiguous_video(self):
         while self.active:
-            video_path = self._download_video()
-            if video_path:
-                video_name = os.path.basename(video_path)
-                description = self.metadata.get(video_name, "No description available")
-                cap = cv2.VideoCapture(video_path)
-                frames = []
-                while True:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    resized_frame = self._resize_frame(frame)
-                    frames.append(resized_frame)
-                if frames:
-                    self.queue.put((np.array(frames), description))
-                cap.release()
-                os.unlink(video_path)  # Clean up the temporary file
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                temp_local_filename = tmp_file.name
+                video_path, video_name = self._download_video(temp_local_filename)  # Receive both path and name
+                if video_path and video_name:
+                    description = self._fetch_video_description(video_name)
+                    cap = cv2.VideoCapture(video_path)
+                    frames = []
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret or len(frames) >= 100:
+                            break
+                        resized_frame = self._resize_frame(frame)
+                        frames.append(resized_frame)
+                    if frames:
+                        self.queue.put((np.array(frames), description))
+                    cap.release()
 
+                # Cleanup the temporary file after processing
+                os.unlink(video_path)
 
     def _worker_array_tuple(self):
         """Worker function to download and deserialize .pkl files containing (description, array) tuples."""
@@ -113,7 +128,7 @@ class VideoDataLoader:
                 os.unlink(temp_local_filename)  # Clean up the temporary file
 
     def get_data(self):
-        return self.queue.get() if not self.queue.empty() else None
+        return self.queue.get() #if not self.queue.empty() else None
 
 
 class VideoUploader:
