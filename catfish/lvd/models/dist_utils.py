@@ -31,15 +31,18 @@ class DistManager:
 
         self.prng_key = self.scatter(uniform_sharding)(host_key)
     
+    def sharding(self, partition_spec):
+        return shrd.NamedSharding(self.mesh, partition_spec)
+    
     def scatter(self, sharding):
         f = jax.jit(id, in_shardings=None, out_shardings=sharding)
         return f
     
     def gather(self, sharding):
-        f = lambda x: jax.device_get(jax.jit(id, in_shardings=sharding, out_shardings=sharding))(x)
+        f = lambda x: jax.device_get(jax.jit(id, in_shardings=sharding, out_shardings=None))(x)
         return f
 
-    def init_random_array(self, shape, std, sharding, key):
+    def init_randn_array(self, shape, std, sharding, key):
         cpu_array = self._init_array_cpu(key, std, shape)
         array = self.scatter(sharding)(cpu_array)
         return array
