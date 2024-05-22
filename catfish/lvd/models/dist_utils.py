@@ -13,7 +13,7 @@ import jax.sharding as shrd
 
 
 class DistManager:
-    def __init__(self, key, mesh_shape):
+    def __init__(self, mesh_shape):
         self.pid = jax.process_index()
         self.cpu_device = jax.local_devices("cpu")[0]
         self.local_accelerators = jax.local_devices()
@@ -24,12 +24,14 @@ class DistManager:
         
         self.mesh = shrd.Mesh(self.physical_mesh, ("dp","mp","fsdp"))
         
+        self.uniform_sharding = shrd.NamedSharding(self.mesh, shrd.PartionSpec())
+    
+    def get_key(self, key):
+        uniform_sharding = shrd.NamedSharding(self.mesh, shrd.PartionSpec())
         with jax.default_device(self.cpu_device):
             host_key = jax.random.PRNGKey(key)
-        
-        uniform_sharding = shrd.NamedSharding(self.mesh, shrd.PartionSpec())
-
-        self.prng_key = self.scatter(uniform_sharding)(host_key)
+        prng_key = self.scatter(uniform_sharding)(host_key)
+        return prng_key
     
     def sharding(self, partition_spec):
         return shrd.NamedSharding(self.mesh, partition_spec)
@@ -43,16 +45,19 @@ class DistManager:
         return f
 
     def init_randn_array(self, shape, std, sharding, key):
-        cpu_array = self._init_array_cpu(key, std, shape)
+        cpu_array = self._init_randn_cpu(key, std, shape)
         array = self.scatter(sharding)(cpu_array)
         return array
 
-    def _init_array_cpu(self, key, std, shape):
+    def init_pytree_cpu(self, closure):
+        f = jax.jit(closure, device=self.cpu_device)
+        return f()
+
+    def _init_randn_cpu(self, key, std, shape):
         @jax.jit(device=self.cpu_device)
         def f(key, std, shape):
             return jax.random.normal(key, shape)*std
-        cpu_f = jax.jit(f, device=self.cpu_device)
-        cpu_array = cpu_f(key, std, shape)
+        cpu_array = f(key, std, shape)
         return cpu_array
         
     def save_array(self, array, sharding, path):
