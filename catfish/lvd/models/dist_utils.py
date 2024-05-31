@@ -1,6 +1,8 @@
 import functools
 import os
 
+import google.cloud.storage as gcs
+
 import pickle as pkl
 
 import equinox as eqx
@@ -13,20 +15,23 @@ import jax.sharding as shrd
 import jax.numpy as jnp
 
 
-
 class DistManager:
-    def __init__(self, mesh_shape):
+    def __init__(self, mesh_shape, credentials_path, bucket_name):
         self.pid = jax.process_index()
         self.cpu_device = jax.local_devices(backend="cpu")[0]
         self.local_accelerators = jax.local_devices()
-        
+
         self.mesh_shape = mesh_shape
         self.physical_mesh = mesh_utils.create_device_mesh(
-            mesh_shape, allow_split_physical_axes= True)
-        
-        self.mesh = shrd.Mesh(self.physical_mesh, ("dp","mp","fsdp"))
-        
+            mesh_shape, allow_split_physical_axes=True)
+
+        self.mesh = shrd.Mesh(self.physical_mesh, ("dp", "mp", "fsdp"))
+
         self.uniform_sharding = shrd.NamedSharding(self.mesh, shrd.PartitionSpec())
+
+        # Initialize GCS client
+        self.client = gcs.Client.from_service_account_json(credentials_path)
+        self.bucket = self.client.bucket(bucket_name)
     
     def get_key(self, key):
         uniform_sharding = shrd.NamedSharding(self.mesh, shrd.PartitionSpec())
@@ -50,7 +55,7 @@ class DistManager:
     
     def gather(self, sharding, dtype):
         g = lambda x: x.astype(dtype)
-        f = lambda x: jax.device_get(jax.jit(id, in_shardings=sharding, out_shardings=None))(x)
+        f = lambda x: jax.device_get(jax.jit(g, in_shardings=sharding, out_shardings=None))(x)
         return f
 
     def init_randn_array(self, shape, std, sharding, key):
@@ -63,7 +68,6 @@ class DistManager:
         return f()
 
     def _init_randn_cpu(self, key, std, shape):
-        print(key, std, shape)
 
         with jax.default_device(self.cpu_device):
             @functools.partial(jax.jit, static_argnums=(2,))
@@ -72,22 +76,29 @@ class DistManager:
             cpu_array = f(key, std, shape)
         return cpu_array
         
-    def save_array(self, array, sharding, path):
-        local_array = self.gather(sharding)(array)
-
-        #Only have first process actually write to disk
-        if self.pid != 0:
-            path = "/dev/null"
+    def save_array(self, array, sharding, file_name):
+        if array is not None:
+            local_array = self.gather(sharding, jnp.float32)(array)
+        else:
+            local_array = None
         
-        with open(path, "wb") as f:
-            pkl.dump(f ,local_array)
-        
+        # Only have first process actually write to GCS
+        if self.pid == 0:
+            blob_path = f"{file_name}"
+            blob = self.bucket.blob(blob_path)
+            blob.upload_from_string(pkl.dumps(local_array))
+            print(f"Uploaded {file_name} to GCS at {blob_path}")
         mhu.sync_global_devices("save_sync")
-    
-    def load_array(self, sharding, path):
-        with jax.default_device(self.cpu_device):
-            with open(path, "rb") as f:
-                local_array = pkl.load(f)
-            array = self.scatter(sharding)(local_array)
+
+    def load_array(self, sharding, file_name):
+        blob_path = f"{file_name}"
+        blob = self.bucket.blob(blob_path)
+        local_array_pkl = blob.download_as_string()
+        local_array = pkl.loads(local_array_pkl)
+        
+        if local_array is not None:
+            array = self.scatter(sharding, jnp.float32)(local_array)
+        else:
+            array = None 
         mhu.sync_global_devices("load_sync")
         return array

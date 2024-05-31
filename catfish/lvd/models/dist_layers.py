@@ -1,4 +1,6 @@
 import os
+import functools
+import dataclasses
 
 import jax
 import jax.numpy as jnp
@@ -13,12 +15,13 @@ import catfish.lvd.models.dist_utils as du
 def make_f_dict(pre_dict, dist_manager):
     f_dict = {}
     for name, (p_spec, path) in pre_dict.items():
-        print(name, p_spec, path)
         partition_spec = shrd.PartitionSpec(*p_spec)
         sharding = dist_manager.sharding(partition_spec)
+        path_f = lambda a, b: os.path.join(b, a)
+
         f_dict[name] = {
             "sharding": sharding,
-            "path_fn": lambda p: os.path.join(p, path)
+            "path_fn": functools.partial(path_f, path)
         }
     return f_dict
 
@@ -29,7 +32,7 @@ class ShrdMHAttention(eqx.Module):
     v: jax.Array
     o: jax.Array
     qk_layer_norm: jax.Array | None
-    theta_factor: jax.Array
+    theta_factor: jax.Array = eqx.field(static=True)
     
     def _f_dict(self):
         pre_dict = {
@@ -38,7 +41,7 @@ class ShrdMHAttention(eqx.Module):
             "v": ((("mp","fsdp"), None, None), "v.pkl"),
             "o": ((("mp","fsdp"), None, None), "o.pkl"),
             "qk_layer_norm": (((None,),), "qk_layer_norm.pkl"),
-            "theta_factor":(((None,),), "theta_factor.pkl")
+            "theta_factor":((), "theta_factor.pkl")
         }
         return make_f_dict(pre_dict, self.dist_manager)
     
@@ -151,12 +154,34 @@ class ShrdMHAttention(eqx.Module):
         mask = mask - 1
         mask = mask * jnp.INF
         return mask
+    
     #[pos x d_model] -> [pos x d_model]
     def __call__(self, x):
         seq_length = x.shape[0]  # Get the sequence length
         causal_mask = self._causal_mask(seq_length)  # Create the causal mask for the sequence
         y = self._mha(x, self.q, self.k, self.v, self.o, causal_mask)
         return y
+    
+    def save(self, path_prefix):
+        for key, value in self._f_dict().items():
+            array = getattr(self, key)
+            path = value["path_fn"](path_prefix)
+            sharding = value["sharding"](path_prefix)
+            self.dist_manager.save_array(
+                array, sharding, path)
+    
+    def load(self, path_prefix):
+        new_self = self
+        for key, value in self._f_dict().items():
+            path = value["path_fn"](path_prefix)
+            sharding = value["sharding"]
+            array = self.dist_manager.load_array(
+                sharding, path)
+            
+            where = lambda x: getattr(x, key)
+            new_self = eqx.tree_at(where, new_self, array)
+        
+        return new_self
 
 #TODO: Support dilation
 class ShrdConv(eqx.Module):
@@ -170,8 +195,7 @@ class ShrdConv(eqx.Module):
         pre_dict = {
             "kernel": ((None,None,("mp","fsdp"), None), "weight.pkl"),
             "bias": ((None), "bias.pkl"),
-            "scale":((None), "scale.pkl")
-
+            "scale":((), "scale.pkl")
         }
         return make_f_dict(pre_dict, self.dist_manager)
     
@@ -207,33 +231,37 @@ class ShrdConv(eqx.Module):
         return y
     
     def save(self, path_prefix):
-        for key, value in self._f_dict():
+        for key, value in self._f_dict().items():
             array = getattr(self, key)
             path = value["path_fn"](path_prefix)
-            sharding = value["sharding"](path_prefix)
+            sharding = value["sharding"]
             self.dist_manager.save_array(
                 array, sharding, path)
     
     def load(self, path_prefix):
-        for key, value in self._f_dict():
+        new_self = self
+        for key, value in self._f_dict().items():
             path = value["path_fn"](path_prefix)
-            sharding = value["sharding"](path)
+            sharding = value["sharding"]
             array = self.dist_manager.load_array(
                 sharding, path)
-            setattr(self, key, array)
+            
+            where = lambda x: getattr(x, key)
+            new_self = eqx.tree_at(where, new_self, array)
+        
+        return new_self
 
 class ShrdLinear(eqx.Module):
     dist_manager: du.DistManager = eqx.field(static=True)
     weight: jax.Array
     bias: jax.Array | None
-    scale: jax.Array = eqx.field(static=True)
+    scale: jax.Array
     
     def _f_dict(self):
         pre_dict = {
             "weight": ((("mp","fsdp"), None), "weight.pkl"),
             "bias": (((None),), "bias.pkl"),
-            "scale":(((None),), "scale.pkl")
-
+            "scale":((), "scale.pkl")
         }
         return make_f_dict(pre_dict, self.dist_manager)
     
@@ -266,27 +294,33 @@ class ShrdLinear(eqx.Module):
         return y
     
     def save(self, path_prefix):
-        for key, value in self._f_dict():
+        for key, value in self._f_dict().items():
             array = getattr(self, key)
             path = value["path_fn"](path_prefix)
-            sharding = value["sharding"](path_prefix)
+            sharding = value["sharding"]
+            print(key, path, sharding)
             self.dist_manager.save_array(
                 array, sharding, path)
     
     def load(self, path_prefix):
-        for key, value in self._f_dict():
+        new_self = self
+        for key, value in self._f_dict().items():
             path = value["path_fn"](path_prefix)
-            sharding = value["sharding"](path)
+            sharding = value["sharding"]
             array = self.dist_manager.load_array(
                 sharding, path)
-            setattr(self, key, array)
+            
+            where = lambda x: getattr(x, key)
+            new_self = eqx.tree_at(where, new_self, array)
+        
+        return new_self
 
 class ConvResBlock(eqx.Module):
     layer1: ShrdConv
     layer2: ShrdConv
 
     def __init__(self, dist_manager, key,  in_dim, latent_dim):
-        key1, key2 = jnp.random.split(key)
+        key1, key2 = jax.random.split(key)
 
         self.dist_manager = dist_manager
 
@@ -314,10 +348,19 @@ class ConvResBlock(eqx.Module):
         self.layer2.save(path2)
     
     def load(self, path_prefix):
+        new_self = self
+
         path1 = os.path.join(path_prefix, f"layer_1")
-        self.layer1.load(path1)
+        layer1 = self.layer1.load(path1)
+        where = lambda x: x.layer1
+        new_self = eqx.tree_at(where, new_self, layer1)
+        
         path2 = os.path.join(path_prefix, f"layer_2")
-        self.layer2.load(path2)
+        layer2 = self.layer2.load(path2)
+        where = lambda x: x.layer2
+        new_self = eqx.tree_at(where, new_self, layer2)
+
+        return new_self
 
 class TransformerBlock(eqx.Module):
     mlpl1: ShrdLinear
@@ -353,12 +396,23 @@ class TransformerBlock(eqx.Module):
         self.attn.save(path3)
     
     def load(self, path_prefix):
+        new_self = self
         path1 = os.path.join(path_prefix, f"mlpl_1")
-        self.mlpl11.load(path1)
+        mlpl1 =  self.mlpl1.load(path1)
+        where = lambda x: x.mlpl1
+        new_self = eqx.tree_at(where, new_self, mlpl1)
+        
         path2 = os.path.join(path_prefix, f"mlpl_2")
-        self.mlpl21.load(path2)
+        mlpl2 =  self.mlpl21.load(path2)
+        where = lambda x: x.mlpl2
+        new_self = eqx.tree_at(where, new_self, mlpl2)
+        
         path3 = os.path.join(path_prefix, f"attn")
-        self.attn.load(path3)
+        attn =  self.attn.load(path3)
+        where = lambda x: x.attn
+        new_self = eqx.tree_at(where, new_self, attn)
+
+        return new_self
 
         
 
