@@ -5,14 +5,6 @@ import jax.numpy as jnp
 import catfish.lvd.models.dist_layers as dl
 import catfish.lvd.models.dist_utils as du
 
-@pytest.fixture
-def dist_manager():
-    return du.DistManager((4, 2, 1), "service-account-key.json", "lvd_test")
-
-@pytest.fixture
-def prng_key():
-    return jax.random.PRNGKey(42)
-
 def test_shrd_mh_attention(dist_manager, prng_key):
     n_head, d_model, d_qk, d_v = 8, 128, 64, 64
     x = jax.random.normal(prng_key, (10, d_model))
@@ -29,28 +21,28 @@ def test_shrd_mh_attention(dist_manager, prng_key):
     assert jnp.allclose(y1, y2), "Attention outputs do not match after reload."
 
 def test_shrd_conv(dist_manager, prng_key):
-    x = jax.random.normal(prng_key, (10, 10, 3))  # Example input for convolution
+    x = jax.random.normal(prng_key, (10, 10, 8))  # Example input for convolution
     key1, key2 = jax.random.split(prng_key)
 
-    conv_layer = dl.ShrdConv(dist_manager, key1, 3, 3, 3, 10)
+    conv_layer = dl.ShrdConv(dist_manager, key1, 3, 3, 8, 10)
     y1 = conv_layer(x)
     conv_layer.save("/test/shrdconv")
     
-    conv_layer = dl.ShrdConv(dist_manager, key2, 3, 3, 3, 10)
+    conv_layer = dl.ShrdConv(dist_manager, key2, 3, 3, 8, 10)
     conv_layer = conv_layer.load("/test/shrdconv")
     y2 = conv_layer(x)
     
     assert jnp.allclose(y1, y2), "Convolution outputs do not match after reload."
 
 def test_conv_res_block(dist_manager, prng_key):
-    x = jax.random.normal(prng_key, (10, 10, 3))  # Example input
+    x = jax.random.normal(prng_key, (10, 10, 8))  # Example input
     key1, key2 = jax.random.split(prng_key)
 
-    res_block = dl.ConvResBlock(dist_manager, key1, 3, 10)
+    res_block = dl.ConvResBlock(dist_manager, key1, 8, 10)
     y1 = res_block(x)
     res_block.save("/test/convresblock")
     
-    res_block = dl.ConvResBlock(dist_manager, key2, 3, 10)
+    res_block = dl.ConvResBlock(dist_manager, key2, 8, 10)
     res_block = res_block.load("/test/convresblock")
     y2 = res_block(x)
     

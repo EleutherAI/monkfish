@@ -48,7 +48,7 @@ class Encoder(eqx.Module):
     #[3 x 512 x 256] -> [32 x 32 x 32]
     def __call__(self, x):
         h = reshape_to_patches(x)
-        for i in range(0,len(layers)):
+        for i in range(0,len(self.layers)):
             h = self.layers[i](h)
         
         y_patches = h
@@ -103,7 +103,7 @@ class Decoder(eqx.Module):
             layer.save(path)
         
         path = os.path.join(path_prefix,f"decoder_unembed")
-        decode_embed.save(path)
+        self.decode_embed.save(path)
     
     def load(self, path_prefix):
         for i,layer in enumerate(self.layers):
@@ -111,6 +111,6 @@ class Decoder(eqx.Module):
             layer.load(path)
         
         path = os.path.join(path_prefix,f"decoder_unembed")
-        decode_embed.save(path)
+        self.decode_embed.load(path)
 
 

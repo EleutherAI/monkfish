@@ -1,6 +1,5 @@
 import os
 import functools
-import dataclasses
 
 import jax
 import jax.numpy as jnp
@@ -32,7 +31,7 @@ class ShrdMHAttention(eqx.Module):
     v: jax.Array
     o: jax.Array
     qk_layer_norm: jax.Array | None
-    theta_factor: jax.Array = eqx.field(static=True)
+    theta_factor: jax.Array
     
     def _f_dict(self):
         pre_dict = {
@@ -40,67 +39,70 @@ class ShrdMHAttention(eqx.Module):
             "k": ((("mp","fsdp"), None, None), "k.pkl"),
             "v": ((("mp","fsdp"), None, None), "v.pkl"),
             "o": ((("mp","fsdp"), None, None), "o.pkl"),
-            "qk_layer_norm": (((None,),), "qk_layer_norm.pkl"),
+            "qk_layer_norm": ((None,), "qk_layer_norm.pkl"),
             "theta_factor":((), "theta_factor.pkl")
         }
         return make_f_dict(pre_dict, self.dist_manager)
     
     def __init__(self, dist_manager, key, d_model, n_head, d_qk, d_v, qk_layer_norm=False, theta_factor=10000):
+        keys = jax.random.split(key, 6)
+
+
         self.dist_manager = dist_manager
 
         #Init q 
         shape = (n_head, d_model, d_qk)
         std = 1
         self.q = self.dist_manager.init_randn_array(
-            self, shape, std, self._f_dict()["q"]["sharding"])
+            shape, std, self._f_dict()["q"]["sharding"], keys[0])
         
         #Init k
         shape = (n_head, d_model, d_qk)
         std = 1
         self.k = self.dist_manager.init_randn_array(
-            self, shape, std, self._f_dict()["k"]["sharding"])
+            shape, std, self._f_dict()["k"]["sharding"], keys[1])
         
         #Init v
         shape = (n_head, d_model, d_v)
         std = 1
         self.v = self.dist_manager.init_randn_array(
-            self, shape, std, self._f_dict()["v"]["sharding"])
+            shape, std, self._f_dict()["v"]["sharding"], keys[2])
         
         #Init o
         shape = (n_head, d_v, d_model)
         std = 1
         self.o = self.dist_manager.init_randn_array(
-            self, shape, std, self._f_dict()["v"]["sharding"])
+            shape, std, self._f_dict()["o"]["sharding"], keys[3])
         
         #Init theta_factor 
         shape = ()
         std = 0
         self.theta_factor = self.dist_manager.init_randn_array(
-            self, shape, std, self._f_dict()["v"]["sharding"])
+            shape, std, self._f_dict()["theta_factor"]["sharding"], keys[4])
         self.theta_factor += theta_factor
         
         #Init qk_layer_norm 
         if qk_layer_norm:
-            shape = ()
+            shape = (n_head,)
             std = 0
             self.qk_layer_norm = self.dist_manager.init_randn_array(
-                self, shape, std, self._f_dict()["qk_layer_norm"]["sharding"])
+                shape, std, self._f_dict()["qk_layer_norm"]["sharding"], keys[5])
         else:
             self.qk_layer_norm = None
     
-    def _mha(self, x, q, k, v, o, mask=None):
+    def _mha(self, x, q, k, v, o, mask):
         par_sha = jax.vmap(self._sha, in_axes=(None, 0, 0, 0, None))
 
         #[pos x d_model] x [head x d_model x d_qk] x 
         #[head x d_model x d_qk] x [head x d_model x d_v] -> 
         #[head x pos x d_v]
-        y = par_sha(x, q, k, v)
+        y = par_sha(x, q, k, v, mask)
         
         #[head x pos x d_v] x [head x d_v x d_model] -> [pos x d_model]
         z = jnp.einsum("ijk,ikl->jl", y, o)
         return z
         
-    def _sha(self, x,  q, k, v, mask=None):
+    def _sha(self, x,  q, k, v, mask):
         
         #[pos x d_model] x [d_model x d_qk] -> [pos x d_qk]
         pre_qs = jnp.einsum("ij,jk->ik", x, q)
@@ -122,7 +124,7 @@ class ShrdMHAttention(eqx.Module):
         y = jnp.einsum("ij,jk->ik", attention_weights, vs)
         
         return y
-    
+    #[pos x d_qk] -> [pos x d_qk]
     def _rope_embed(self, x):
         d_qk = self.q.shape[2]
         d_pos = x.shape[0]
@@ -133,16 +135,16 @@ class ShrdMHAttention(eqx.Module):
         rot_factor = jnp.einsum("i,j->ij", pos_vector, rate_vector)
         sin_factor, cos_factor = jnp.sin(rot_factor),jnp.cos(rot_factor)
 
-        x1,x2 = x[:,:d_pos],x[:,d_pos:]
+        x1,x2 = x[:,:d_rope],x[:,d_rope:]
 
         y1 = cos_factor*x1 - sin_factor*x2
         y2 = sin_factor*x1 + cos_factor*x2
 
-        y = jax.concatenate([y1, y2], axis=1)
+        y = jnp.concatenate([y1, y2], axis=1)
         
         #Norm step
         if self.qk_layer_norm is None:
-            y = y/(d_qk^(1/4))
+            y = y/(d_qk**(1/4))
         else:
             raise NotImplementedError
         
@@ -152,9 +154,10 @@ class ShrdMHAttention(eqx.Module):
         # Creating a lower triangular matrix of ones (including diagonal)
         mask = jnp.tril(jnp.ones((size, size)))
         mask = mask - 1
-        mask = mask * jnp.INF
+        #TODO: Less hacky
+        mask = mask * 1000000000
         return mask
-    
+
     #[pos x d_model] -> [pos x d_model]
     def __call__(self, x):
         seq_length = x.shape[0]  # Get the sequence length
@@ -164,9 +167,10 @@ class ShrdMHAttention(eqx.Module):
     
     def save(self, path_prefix):
         for key, value in self._f_dict().items():
+            print(key, value)
             array = getattr(self, key)
             path = value["path_fn"](path_prefix)
-            sharding = value["sharding"](path_prefix)
+            sharding = value["sharding"]
             self.dist_manager.save_array(
                 array, sharding, path)
     
@@ -188,19 +192,20 @@ class ShrdConv(eqx.Module):
     dist_manager: du.DistManager = eqx.field(static=True)
     kernel: jax.Array
     bias: jax.Array
-    scale: jax.Array = eqx.field(static=True)
+    scale: jax.Array
     padding: str = eqx.field(static=True)
     
     def _f_dict(self):
         pre_dict = {
-            "kernel": ((None,None,("mp","fsdp"), None), "weight.pkl"),
-            "bias": ((None), "bias.pkl"),
+            "kernel": ((("mp","fsdp"), None, None, None), "kernel.pkl"),
+            "bias": ((None,), "bias.pkl"),
             "scale":((), "scale.pkl")
         }
         return make_f_dict(pre_dict, self.dist_manager)
     
     def __init__(self, dist_manager, key, h, w, in_dim, out_dim, 
                  padding="SAME", bias=False):
+        key1,key2 = jax.random.split(key)
         self.dist_manager = dist_manager
         
         self.scale = 1/jax.numpy.sqrt(h*w*in_dim)
@@ -208,24 +213,27 @@ class ShrdConv(eqx.Module):
         self.padding = padding
         
         #Init kernel 
-        shape = (h, w, in_dim, out_dim)
+        shape = (in_dim, out_dim, h, w)
         std = 1
-        self.weight = self.dist_manager.init_randn_array(
-            self, shape, std, self._f_dict()["weight"]["sharding"])
+        self.kernel = self.dist_manager.init_randn_array(
+            shape, std, self._f_dict()["kernel"]["sharding"], key1)
         
         #Init bias
         if bias:
             shape = (out_dim,)
             std = 0
             self.bias = self.dist_manager.init_randn_array(
-                self, shape, std, self._f_dict()["bias"]["sharding"])
+                shape, std, self._f_dict()["bias"]["sharding"], key2)
         else:
             self.bias = None
     
     #Assumping padding = SAME
     #[in_dim x height x width] -> [out_dim x width x in_dim]
     def __call__(self, x):
-        y = lax.conv_with_general_padding(x, self.weight)
+        y = lax.conv_with_general_padding(
+            x[jnp.newaxis,:,:], self.kernel, 
+            window_strides=(1,1), padding=self.padding, 
+            lhs_dilation=None, rhs_dilation=None)[0,:,:,:]
         if self.bias is not None:
             y = y + self.bias
         return y
@@ -298,7 +306,6 @@ class ShrdLinear(eqx.Module):
             array = getattr(self, key)
             path = value["path_fn"](path_prefix)
             sharding = value["sharding"]
-            print(key, path, sharding)
             self.dist_manager.save_array(
                 array, sharding, path)
     
@@ -316,6 +323,7 @@ class ShrdLinear(eqx.Module):
         return new_self
 
 class ConvResBlock(eqx.Module):
+    dist_manager: du.DistManager = eqx.field(static=True)
     layer1: ShrdConv
     layer2: ShrdConv
 
@@ -336,9 +344,10 @@ class ConvResBlock(eqx.Module):
         return y
     
     def _norm(self, x):
-        m = jnp.mean(x, dim=0)
-        s = jnp.std(x, dim=0)
-        y = (x-m)/(s)
+        print(x.shape)
+        m = jnp.mean(x, axis=2)
+        s = jnp.std(x, axis=2)
+        y = (x-m[:,:, jnp.newaxis])/(s[:,:, jnp.newaxis])
         return y
 
     def save(self, path_prefix):
@@ -373,16 +382,16 @@ class TransformerBlock(eqx.Module):
         self.attn = ShrdMHAttention(dist_manager, key, res_dim, n_head, qk_dim, v_dim)
     
     def _norm(self, x):
-        m = jnp.mean(x, dim=1)
-        s = jnp.std(x, dim=1)
-        y = (x-m)/(s)
+        m = jnp.mean(x, axis=1)
+        s = jnp.std(x, axis=1)
+        y = (x-m[:, jnp.newaxis])/(s[:, jnp.newaxis])
         return y
     
     #[pos x res_dim] -> [pos x res_dim]
     def __call__(self, x):
         h1 = self._norm(x)
-        h2 = jax.vmap(x)(self.mpll1)(h1)
-        h3 = jax.vmap(x)(self.mpll2)(h2)
+        h2 = jax.vmap(self.mlpl1)(h1)
+        h3 = jax.vmap(self.mlpl2)(h2)
         h4 = self.attn(h1)
         y = h3 + h4 + x
         return y
@@ -403,7 +412,7 @@ class TransformerBlock(eqx.Module):
         new_self = eqx.tree_at(where, new_self, mlpl1)
         
         path2 = os.path.join(path_prefix, f"mlpl_2")
-        mlpl2 =  self.mlpl21.load(path2)
+        mlpl2 =  self.mlpl2.load(path2)
         where = lambda x: x.mlpl2
         new_self = eqx.tree_at(where, new_self, mlpl2)
         
