@@ -14,4 +14,4 @@ def prng_key():
 @pytest.fixture
 def input_image(prng_key):
     # Create a dummy input image of shape [3 x 512 x 256]
-    return jax.random.normal(prng_key(), (3, 512, 256))
+    return jax.random.normal(prng_key, (3, 512, 256))

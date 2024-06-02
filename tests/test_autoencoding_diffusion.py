@@ -7,14 +7,14 @@ import catfish.lvd.models.dist_utils as du
 import catfish.lvd.models.dist_autoencoding_diffusion as dad
 
 def test_encoder_decoder_initialization(dist_manager, prng_key):
-    key = jax.random.split(prng_key(), 2)
+    key = jax.random.split(prng_key, 2)
     encoder = dad.Encoder(dist_manager, key[0], k=2, n_layers=2)
     decoder = dad.Decoder(dist_manager, key[1], k=2, n_layers=2)
     assert isinstance(encoder, dad.Encoder), "Encoder initialization failed"
     assert isinstance(decoder, dad.Decoder), "Decoder initialization failed"
 
 def test_encoder_decoder_forward_pass(dist_manager, prng_key, input_image):
-    key = jax.random.split(prng_key(), 3)
+    key = jax.random.split(prng_key, 3)
     encoder = dad.Encoder(dist_manager, key[0], k=2, n_layers=2)
     decoder = dad.Decoder(dist_manager, key[1], k=2, n_layers=2)
 
