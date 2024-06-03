@@ -68,7 +68,6 @@ class DistManager:
         return f()
 
     def _init_randn_cpu(self, key, std, shape):
-
         with jax.default_device(self.cpu_device):
             @functools.partial(jax.jit, static_argnums=(2,))
             def f(key, std, shape):

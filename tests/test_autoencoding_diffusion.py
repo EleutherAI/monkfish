@@ -14,7 +14,7 @@ def test_encoder_decoder_initialization(dist_manager, prng_key):
     assert isinstance(decoder, dad.Decoder), "Decoder initialization failed"
 
 def test_encoder_decoder_forward_pass(dist_manager, prng_key, input_image):
-    key = jax.random.split(prng_key, 3)
+    key = jax.random.split(prng_key, 2)
     encoder = dad.Encoder(dist_manager, key[0], k=2, n_layers=2)
     decoder = dad.Decoder(dist_manager, key[1], k=2, n_layers=2)
 
@@ -24,7 +24,8 @@ def test_encoder_decoder_forward_pass(dist_manager, prng_key, input_image):
     assert decoded.shape == input_image.shape, f"Output shape mismatch in decoder, expected {input_image.shape}, got {decoded.shape}"
 
 def test_save_load_consistency(dist_manager, prng_key, input_image):
-    key_initial = jax.random.split(prng_key(), 3)
+    key = jax.random.split(prng_key, 2)
+    key_initial = jax.random.split(key[0], 3)
     encoder_initial = dad.Encoder(dist_manager, key_initial[0], k=2, n_layers=2)
     decoder_initial = dad.Decoder(dist_manager, key_initial[1], k=2, n_layers=2)
 
@@ -37,13 +38,13 @@ def test_save_load_consistency(dist_manager, prng_key, input_image):
     decoder_initial.save("/test/decoder")
 
     # Reinstance models with new keys
-    key_reloaded = jax.random.split(prng_key(), 3)
+    key_reloaded = jax.random.split(key[1], 3)
     encoder_reloaded = dad.Encoder(dist_manager, key_reloaded[0], k=2, n_layers=2)
     decoder_reloaded = dad.Decoder(dist_manager, key_reloaded[1], k=2, n_layers=2)
 
     # Load models
-    encoder_reloaded.load("/test/encoder")
-    decoder_reloaded.load("/test/decoder")
+    encoder_reloaded = encoder_reloaded.load("/test/encoder")
+    decoder_reloaded = decoder_reloaded.load("/test/decoder")
 
     # Verify consistency after load
     encoded_reloaded = encoder_reloaded(input_image)
@@ -56,5 +57,10 @@ def test_save_load_consistency(dist_manager, prng_key, input_image):
 
 def test_patch_reconstruction_integrity(input_image):
     patches = dad.reshape_to_patches(input_image)
-    reconstructed = dad.reconstruct_from_patches(patches, input_image.shape)
+    reconstructed = dad.reconstruct_from_patches(patches)
     assert jnp.allclose(input_image, reconstructed), "Patch reconstruction failed to retain data integrity."
+
+def test_patch_contiguity(input_image):
+    transform_image = input_image.at[:,:16,:8].set(1)
+    patches = dad.reshape_to_patches(transform_image, patch_width=16, patch_height=8)
+    assert jnp.allclose(jnp.mean(patches[:,0,0]),1)

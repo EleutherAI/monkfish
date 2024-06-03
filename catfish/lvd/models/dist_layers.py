@@ -213,7 +213,7 @@ class ShrdConv(eqx.Module):
         self.padding = padding
         
         #Init kernel 
-        shape = (in_dim, out_dim, h, w)
+        shape = (out_dim, in_dim, h, w)
         std = 1
         self.kernel = self.dist_manager.init_randn_array(
             shape, std, self._f_dict()["kernel"]["sharding"], key1)
@@ -228,8 +228,9 @@ class ShrdConv(eqx.Module):
             self.bias = None
     
     #Assumping padding = SAME
-    #[in_dim x height x width] -> [out_dim x width x in_dim]
+    #[in_dim x height x width] -> [out_dim x height x width]
     def __call__(self, x):
+        print("K:", x.shape, self.kernel.shape)
         y = lax.conv_with_general_padding(
             x[jnp.newaxis,:,:], self.kernel, 
             window_strides=(1,1), padding=self.padding, 
