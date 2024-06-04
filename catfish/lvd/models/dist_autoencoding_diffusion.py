@@ -49,7 +49,7 @@ class Encoder(eqx.Module):
         embedding = dl.ShrdConv(dist_manager, keys[0], 1,1, 384,128*k)
         layers.append(embedding)
         for i in range(n_layers):
-            res_block = dl.ConvResBlock(dist_manager, keys[0], 128*k, 4*128*k)
+            res_block = dl.ConvResBlock(dist_manager, keys[i], 128*k, 4*128*k)
             layers.append(res_block)
         unembedding = dl.ShrdConv(dist_manager, keys[-1], 1,1, 128*k, 32)
         layers.append(unembedding)
