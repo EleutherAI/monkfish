@@ -44,7 +44,8 @@ class ShrdMHAttention(eqx.Module):
         }
         return make_f_dict(pre_dict, self.dist_manager)
     
-    def __init__(self, dist_manager, key, d_model, n_head, d_qk, d_v, qk_layer_norm=False, theta_factor=10000):
+    def __init__(self, dist_manager, key, d_model, 
+                 n_head, d_qk, d_v, qk_layer_norm=False, theta_factor=10000):
         keys = jax.random.split(key, 6)
 
 
@@ -167,7 +168,6 @@ class ShrdMHAttention(eqx.Module):
     
     def save(self, path_prefix):
         for key, value in self._f_dict().items():
-            print(key, value)
             array = getattr(self, key)
             path = value["path_fn"](path_prefix)
             sharding = value["sharding"]
@@ -230,7 +230,6 @@ class ShrdConv(eqx.Module):
     #Assumping padding = SAME
     #[in_dim x height x width] -> [out_dim x height x width]
     def __call__(self, x):
-        print("K:", x.shape, self.kernel.shape)
         y = lax.conv_with_general_padding(
             x[jnp.newaxis,:,:], self.kernel, 
             window_strides=(1,1), padding=self.padding, 
@@ -345,7 +344,6 @@ class ConvResBlock(eqx.Module):
         return y
     
     def _norm(self, x):
-        print(x.shape)
         m = jnp.mean(x, axis=2)
         s = jnp.std(x, axis=2)
         y = (x-m[:,:, jnp.newaxis])/(s[:,:, jnp.newaxis])
@@ -377,9 +375,10 @@ class TransformerBlock(eqx.Module):
     mlpl2: ShrdLinear
     attn: ShrdMHAttention
 
-    def __init__(self, dist_manager, key, res_dim, latent_dim, qk_dim, v_dim, n_head):
-        self.mlpl1 = ShrdLinear(dist_manager, key, res_dim, latent_dim)
-        self.mlpl2 = ShrdLinear(dist_manager, key, latent_dim, res_dim)
+    def __init__(self, dist_manager, key, res_dim, mlp_dim, 
+                 qk_dim, v_dim, n_head):
+        self.mlpl1 = ShrdLinear(dist_manager, key, res_dim, mlp_dim)
+        self.mlpl2 = ShrdLinear(dist_manager, key, mlp_dim, res_dim)
         self.attn = ShrdMHAttention(dist_manager, key, res_dim, n_head, qk_dim, v_dim)
     
     def _norm(self, x):

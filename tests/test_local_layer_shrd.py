@@ -76,7 +76,5 @@ def test_shrd_linear(dist_manager, prng_key):
     linear_layer = linear_layer.load("/test/shrdlinear")
     y2 = linear_layer(x)
 
-    print(y1, y2)
-
     assert jnp.allclose(y1, y2), "Linear layer outputs do not match after reload."
 
