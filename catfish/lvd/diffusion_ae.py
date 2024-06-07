@@ -1,8 +1,33 @@
 
-def reconstruct(args, cfg):
+class DiffAEHarness:
+    """Sharded Diffusion autoencoder harness"""
 
-def train(data_loader, model, optimizer ):
+    def __init__(args, cfg):
+        self.args = args
+        self.cfg = cfg
+        self.model = None
+        self.optimizer = None
 
-def encode():
+        self.make_model()
+    
+    def make_model():
+        args = self.args
+        cfg = self.cfg
+        
+        self.model = 
+    
+    def make_optimizer():
+        args = self.args
+        cfg = self.cfg
+    
+    def train():
+        args = self.args
+        cfg = self.cfg
 
-def decode():
+    def autoencode():
+        args = self.args
+        cfg = self.cfg
+    
+
+
+
