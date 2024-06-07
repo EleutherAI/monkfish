@@ -64,9 +64,13 @@ def test_mixture_model(setup_mixture_data, setup_model):
         loss = dc.diffusion_loss(model , data, dc.f_neg_gamma, key)
         return loss
 
+    """
     # Training loop
     for _ in range(250000):  # Enough iterations to ensure convergence
         loss, state = dc.update_state(state, data, optimizer, loss_fn)
+    """
+    f =  lambda i, x: dc.update_state(x, data, optimizer, loss_fn)[1]
+    state = jax.lax.fori_loop(0, 250000, f, state)
 
     # Sampling
     sampled_output = dc.sample_diffusion(x_data, state[0], dc.f_neg_gamma, key, n_steps, shape) 
