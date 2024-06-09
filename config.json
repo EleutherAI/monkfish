@@ -1,0 +1,38 @@
+{
+    "seed": 42
+    "diffusion_auto_encoder":{
+        "dist_manager":{
+            "sharding": [8,1,1],
+            "sharding": [8,1,1],
+        }
+        "model": {
+            "encoder":{
+                "k":4,
+                "n_layers":5
+            },
+            "decoder":{
+                "k":5,
+                "n_layers": 50
+            }
+        },
+        "train": {
+            "lr":0.0001,
+            "warmup_steps": 1000
+        }
+    },
+    "transformer_ardm":{
+        "model": {
+            "res_dim": 512,
+            "io_dim": 512,
+            "vocab": 256,
+            "n_layers": 512,
+            "mlp_dim": 512,
+            "qk_dim": 128,
+            "v_dim": 128 
+        },
+        "train": {
+            "lr":0.0001,
+            "warmup_steps": 1000
+        }
+    }
+}
