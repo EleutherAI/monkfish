@@ -8,6 +8,7 @@ import optax
 import catfish.lvd.models.dist_autoencoding_diffusion as daed
 import catfish.lvd.models.dist_utils as du
 import catfish.lvd.gcp_data_loader as dl
+import catfish.lvd.diffusion_core as dc
 
 
 DAEModel = collections.namedtuple(["encoder", "decoder"])
@@ -18,8 +19,7 @@ class DiffAEHarness:
     def __init__(self, args, cfg):
         self.args = args
         self.cfg = cfg
-        self.model = None
-        self.opt_state = None
+        self.state = {}
         self.optimizer = None
         self.prng_key = None
         self.dist_manager = None
@@ -36,7 +36,14 @@ class DiffAEHarness:
         self.gcs_bucket = self.args.gcs_bucket
 
     def init_data_loader(self):
-        self.gcp_data_loader()
+        #Only init dataloader on first node 
+        #TODO:Shard dataloader
+        if self.dist_manager.pid == 0:
+            self.gcp_data_loader = dl.VideoDataLoader(
+                #TODO
+            )
+        else:
+            self.gcp_data_loader = None
     
     def init_dist_manager(self):
         dm_cfg = self.cfg["dist_manager"]
@@ -51,9 +58,9 @@ class DiffAEHarness:
         enc_conf = model_conf["encoder"]
         dec_conf = model_conf["decoder"]
         
-        self.prng_key, enc_key, dec_key = jax.random.split(self.prng_key,3)
+        self.state["prng_key"], enc_key, dec_key = jax.random.split(self.state["prng_key"],3)
 
-        self.model = DAEModel(
+        self.state["model"] = DAEModel(
             encoder=daed.Encoder(
                 self.dist_manager, 
                 key=enc_key, 
@@ -72,7 +79,7 @@ class DiffAEHarness:
         opt_cfg = self.cfg["diffusion_auto_encoder"]["train"]
         
         self.optimizer = optax.adam(lr=opt_cfg["lr"])
-        self.opt_state = self.optimizer.init(self.model)
+        self.state["opt_state"] = self.optimizer.init(self.model)
     
     def save_checkpoint(self, path):
         model_path = os.path.join(path, "model")
@@ -123,6 +130,13 @@ class DiffAEHarness:
     def train(self):
         args = self.args
         cfg = self.cfg
+
+        state = (self.model, self.opt_state, self.prng_key)
+
+        while(True):
+            state = self.opt_state
+            dc.update
+            self.model, self.op
 
     def autoencode(self):
         args = self.args
