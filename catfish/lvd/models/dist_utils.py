@@ -14,7 +14,6 @@ import jax.sharding as shrd
 
 import jax.numpy as jnp
 
-
 class DistManager:
     def __init__(self, mesh_shape, credentials_path, bucket_name):
         self.pid = jax.process_index()

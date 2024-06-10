@@ -1,4 +1,5 @@
 import os
+import collections
 
 import jax
 
@@ -7,6 +8,9 @@ import optax
 import catfish.lvd.models.dist_autoencoding_diffusion as daed
 import catfish.lvd.models.dist_utils as du
 import catfish.lvd.gcp_data_loader as dl
+
+
+DAEModel = collections.namedtuple(["encoder", "decoder"])
 
 class DiffAEHarness:
     """Sharded Diffusion autoencoder harness"""
@@ -41,7 +45,6 @@ class DiffAEHarness:
         mesh_shape = dm_cfg["mesh_shape"]
 
         self.dist_manager = du.DistManager(mesh_shape, self.credientials_path)
-
     
     def make_model(self):
         model_conf = self.conf["diffusion_auto_encoder"]["model"]
@@ -50,20 +53,20 @@ class DiffAEHarness:
         
         self.prng_key, enc_key, dec_key = jax.random.split(self.prng_key,3)
 
-        self.model = {
-            "encoder": daed.Encoder(
+        self.model = DAEModel(
+            encoder=daed.Encoder(
                 self.dist_manager, 
                 key=enc_key, 
                 k =enc_conf["k"],
                 n_layers=enc_conf["n_layers"]
             ),
-            "decoder": daed.Decoder(
+            decoder=daed.Decoder(
                 self.dist_manager, 
                 key=dec_key, 
                 k =dec_conf["k"],
                 n_layers=dec_conf["n_layers"]
             )
-        }
+        )
     
     def make_optimizer(self):
         opt_cfg = self.cfg["diffusion_auto_encoder"]["train"]
@@ -72,19 +75,50 @@ class DiffAEHarness:
         self.opt_state = self.optimizer.init(self.model)
     
     def save_checkpoint(self, path):
-
         model_path = os.path.join(path, "model")
-
-        self.model.save(model_path)
-
+        model_encoder_path = os.path.join(model_path, "encoder")
+        self.model.encoder.save(model_encoder_path)
+        model_decoder_path = os.path.join(model_path, "encoder")
+        self.model.decoder.save(model_decoder_path)
 
         opt_path = os.path.join(path, "opt_state")
-
-        
-
+        for key, value in self.opt_state:
+            if hasattr(value, "save"):
+                opt_state_encoder_path = os.path.join(
+                    opt_path, key, "encoder")
+                value.encoder.save(opt_state_encoder_path)
+                opt_state_decoder_path = os.path.join(
+                    opt_path, key, "encoder")
+                value.encoder.save(opt_state_decoder_path)
+            else:
+               #TODO fix backend 
+               pass
     
-    def load_checkpoint(self):
+    def _new_ckpt_path(self):
         pass
+    
+    def _latest_ckpt_path(self):
+        pass
+    
+    def load_checkpoint(self, path):
+        model_path = os.path.join(path, "model")
+        model_encoder_path = os.path.join(model_path, "encoder")
+        self.model.encoder.save(model_encoder_path)
+        model_decoder_path = os.path.join(model_path, "encoder")
+        self.model.decoder.save(model_decoder_path)
+
+        opt_path = os.path.join(path, "opt_state")
+        for key, value in self.opt_state:
+            if hasattr(value, "save"):
+                opt_state_encoder_path = os.path.join(
+                    opt_path, key, "encoder")
+                value.encoder.save(opt_state_encoder_path)
+                opt_state_decoder_path = os.path.join(
+                    opt_path, key, "encoder")
+                value.encoder.save(opt_state_decoder_path)
+            else:
+               #TODO fix backend 
+               pass
     
     def train(self):
         args = self.args
