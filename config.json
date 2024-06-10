@@ -1,10 +1,9 @@
 {
-    "seed": 42
+    "seed": 42,
     "diffusion_auto_encoder":{
         "dist_manager":{
-            "sharding": [8,1,1],
-            "sharding": [8,1,1],
-        }
+            "sharding": [8,1,1]
+        },
         "model": {
             "encoder":{
                 "k":4,
