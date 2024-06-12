@@ -24,7 +24,7 @@ class DiffAEHarness:
         self.prng_key = None
         self.dist_manager = None
         self.data_loader = None
-        self.credentials_path
+        self.credentials_path = None
 
         self.parse_args()
         self.init_dist_manager()
@@ -38,9 +38,15 @@ class DiffAEHarness:
     def init_data_loader(self):
         #Only init dataloader on first node 
         #TODO:Shard dataloader
+        resolution = self.cfg["diffuison_auto_encoder"]
+
         if self.dist_manager.pid == 0:
             self.gcp_data_loader = dl.VideoDataLoader(
-                #TODO
+                self.credentials_path,
+                self.args.gcs_bucket,
+                self.args.latent_folder,
+                target_resolution=resolution,
+                pkl_folder_path=self.args.video_folder
             )
         else:
             self.gcp_data_loader = None

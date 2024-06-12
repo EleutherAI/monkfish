@@ -9,7 +9,7 @@ from threading import Thread
 import google.cloud.storage as gcs
 
 class VideoDataLoader:
-    def __init__(self, credentials_path, bucket_name, upload_folder_path, target_resolution=(144, 256), metadata_path=None, pkl_folder_path="processed_videos"):
+    def __init__(self, credentials_path, bucket_name, upload_folder_path, target_resolution=(144, 256), pkl_folder_path="processed_videos"):
         self.client = gcs.Client.from_service_account_json(credentials_path)
         self.bucket = self.client.bucket(bucket_name)
         self.upload_folder_path = upload_folder_path
