@@ -1,7 +1,7 @@
 {
     "seed": 42,
     "diffusion_auto_encoder":{
-        "resolution": [512, 256]
+        "resolution": [512, 256],
         "dist_manager":{
             "sharding": [8,1,1]
         },
@@ -17,7 +17,8 @@
         },
         "train": {
             "lr":0.0001,
-            "warmup_steps": 1000
+            "warmup_steps": 1000,
+            "ckpt_freq": 5000
         }
     },
     "transformer_ardm":{

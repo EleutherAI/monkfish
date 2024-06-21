@@ -7,6 +7,7 @@ import equinox as eqx
 import catfish.lvd.models.dist_layers as dl
 
 def reshape_to_patches(data, patch_width=16, patch_height=8):
+    "take a large image and convert chunks of it into channels"
     num_channels, width, height = data.shape
     
     assert height % patch_height == 0
@@ -23,6 +24,8 @@ def reshape_to_patches(data, patch_width=16, patch_height=8):
     return patches
 
 def reconstruct_from_patches(patches, patch_width=16, patch_height=8):
+    """take an image converted into channels and convert it back
+    into a base image"""
 
     patch_channels, height_patches, width_patches = patches.shape
    
