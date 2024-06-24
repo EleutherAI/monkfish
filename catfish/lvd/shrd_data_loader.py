@@ -12,7 +12,7 @@ class ShardedDataUploader:
     def __init__(self, worker_interface, shard_interface, counter, dist_manager, workers_per_node=1):
         pass
 
-class ShardedDataDownoader:
+class ShardedDataDownloader:
     def __init__(self, worker_interface, shard_interface, dist_manager, 
                  workers_per_node=1, batch_size=32, queue_depth=5):
         assert batch_size % dist_manager.nodes == 0
@@ -20,6 +20,8 @@ class ShardedDataDownoader:
         #Start workers
         self.workers_per_node = workers_per_node
         self.batch_size = batch_size
+        self.queue_depth = queue_depth
+        self.dist_manager = dist_manager
         self.pid = dist_manager.pid
         self.nodes = dist_manager.nodes
         self.worker_interface_generator = worker_interface
@@ -44,7 +46,7 @@ class ShardedDataDownoader:
         for i in range(self.workers_per_node):
             start_index = self.counter + i*self.nodes + self.pid
 
-            queue = multiprocessing.Queue()
+            queue = multiprocessing.Queue(maxsize=self.queue_depth)
             worker = multiprocessing.Process(
                 target=self._worker, args=(
                     start_index, queue, self.stop_event
@@ -53,9 +55,23 @@ class ShardedDataDownoader:
 
             self.queues.append(queue)
             self.workers.append(worker)
+            worker.start()
+        
+        self.processed = True
     
     def stop(self):
         self.stop_event.set() 
+
+        # Empty queues to unblock workers trying to put items
+        #Note,there is still a chance this fails under
+        #specific circumstances because of a race condition, 
+        #TODO: fix this
+        while any(not queue.empty() for queue in self.queues):
+            for queue in self.queues:
+                try:
+                    queue.get_nowait()
+                except queue.Empty:
+                    continue
 
         for worker in self.workers:
             worker.join()
@@ -69,32 +85,28 @@ class ShardedDataDownoader:
         
         while(not stop_event.is_set()):
             example = worker_interface.get_example(counter)
-            queue.put(example)
+            queue.put((example, counter))
             counter += self.workers_per_node*self.nodes
 
     def step(self):
         assert self.processed
 
         round_robin_index = self.round_robin_index
-        for _ in range(self.batch_size // self.nodes):
+        local_batch_data = []
+        local_batch_ids = []
+        for i in range(self.batch_size // self.nodes):
+            sub_batch_index = self.round_robin_index + i
+            round_robin_index = sub_batch_index % self.workers_per_node
 
-            sub_batch_components = []
-            sub_batch_ids = []
-            for queue_index, queue in enumerate(self.queues):
-                sub_batch_data, sub_batch_id = self.queues[round_robin_index].get()
-                sub_batch_components.append(sub_batch_data)
-                sub_batch_ids.append(sub_batch_id)
+            data, data_id = self.queues[round_robin_index].get()
+            local_batch_data.append(data)
+            local_batch_ids.append(data_id)
             
-                #Verify expected sub_batch_id
-                assert sub_batch_id == self.counter + queue_index*self.nodes + self.pid
+            #Verify expected id
+            expected_id = self.counter + sub_batch_index*self.nodes + self.pid
+            assert data_id == expected_id
             
-            round_robin_index += 1
-            round_robin_index %= self.workers_per_node
-
-            local_data, data_id = self.queues[queue_index].get()
-            assert data_id == self.counter
-            
-        accelerator_data = self.shard_interface(local_data)
+        accelerator_data = self.shard_interface.host_to_accelerator(local_batch_data, self.batch_size)
         
         self.processed = False
 
@@ -103,8 +115,8 @@ class ShardedDataDownoader:
     def ack(self):
         assert (not self.processed)
         self.counter += self.batch_size
-        self.round_robin += self.batch_size // self.nodes
-        self.round_robin %= self.workers_per_node
+        self.round_robin_index += self.batch_size // self.nodes
+        self.round_robin_index %= self.workers_per_node
         self.processed = True
 
 class DummyWorkerInterface:
@@ -114,27 +126,15 @@ class DummyWorkerInterface:
     
     def list_dir():
         #List all examples in folder
+        pass
     
-    def get_example(self, example_id, mode="contiguous_video"):
+    def get_example(self, example_id):
         #Download and preprocess 1 example
-        pass
+        return None, example_id
     
-    def upload_example(self, path):
+    def upload_example(self, example_id):
         pass
 
-class DummyShardInterface:
-    def host_to_accelerator():
-        pass
-    
-    def accelerator_to_host():
-        pass
-
-class VideoShardInterface:
-    def host_to_accelerator():
-        pass
-    
-    def accelerator_to_host():
-        pass
 
 class VideoWorkerInterface:
     """Interface to Video data, folder is a dataset, 1 train example per file"""
@@ -145,15 +145,27 @@ class VideoWorkerInterface:
         #List all examples in folder
         pass
     
-    def get_example(self, example_id, mode="contiguous_video"):
+    def get_example(self, example_id):
         #Download and preprocess 1 example
         pass
     
     def upload_example(self, example_id):
         pass
+
+class VideoShardInterface:
+    def host_to_accelerator(self, local_data, batch_size):
+        pass
     
-class LatentMediumInterface:
+    def accelerator_to_host(self, global_data):
+        pass
+    
+
+class LatentWorkerInterface:
+    pass
+
+class LatentShardInterface:
     def list_dir():
         #List all examples in folder
+        pass
 
 
