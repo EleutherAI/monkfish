@@ -1,11 +1,15 @@
 import pytest
 import jax
+import fs.memoryfs
 
 import catfish.lvd.models.dist_utils as du
 
 @pytest.fixture
 def dist_manager():
-    return du.DistManager((4, 2, 1), "service-account-key.json", "lvd_test")
+    # Create a memory filesystem instance
+    memory_fs = fs.memoryfs.MemoryFS()
+    # Initialize your DistManager with the memory filesystem
+    return du.DistManager(mesh_shape=(4, 2, 1), filesystem=memory_fs)
 
 @pytest.fixture
 def prng_key():

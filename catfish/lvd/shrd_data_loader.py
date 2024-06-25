@@ -187,6 +187,9 @@ class ImageWorkerInterface:
 
 class ImageShardInterface:
     """Interface to image data, folder is a dataset, 1 train example per file"""
+    def __init__(self, dist_manager):
+        pass
+
     def host_to_accelerator(self, local_data, batch_size):
         pass
     

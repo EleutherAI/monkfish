@@ -7,7 +7,7 @@ import optax
 
 import catfish.lvd.models.dist_autoencoding_diffusion as daed
 import catfish.lvd.models.dist_utils as du
-import catfish.lvd.gcp_data_loader as dl
+import catfish.lvd.shrd_data_loader as sdl
 import catfish.lvd.diffusion_core as dc
 
 
@@ -25,7 +25,7 @@ class DiffAEHarness:
         self.dist_manager = None
         self.data_loader = None
         self.credentials_path = None
-        self.gcs_bucket = None
+        self.data_fs = None
 
         self.parse_args()
         self.init_dist_manager()
@@ -39,21 +39,36 @@ class DiffAEHarness:
         self.log_file = self.args.ckpt_path
 
     def init_data_loader(self):
-        #Only init dataloader on first node 
-        #TODO:Shard dataloader
-        resolution = self.cfg["diffuison_auto_encoder"]
+        dl_conf = self.cfg["diffusion_auto_encoder"]["data_loader"]
+        fs_type = dl_conf["fs_type"]
+        root_directory = dl_conf["data_root_directory"]
+        gcp_credentials_path =  dl_conf["gcp_credentials_path"]
+        gcp_bucket_name =  dl_conf["gcp_bucket_name"]
 
-        if self.dist_manager.pid == 0:
-            self.gcp_data_loader = dl.VideoDataLoader(
-                self.credentials_path,
-                self.args.gcs_bucket,
-                self.args.latent_folder,
-                target_resolution=resolution,
-                pkl_folder_path=self.args.video_folder
-            )
+        if fs_type == "local":
+            self.data_fs = sdl.os_filesystem(root_directory)
+        elif fs_type == "gcp":
+            self.data_fs = self.sdl.os_filesystem(
+                gcp_bucket_name, 
+                root_path=root_directory, 
+                gcp_credentials_path=gcp_credentials_path)
         else:
-            self.gcp_data_loader = None
-    
+            raise Exception(f"Invalid fs_type provided, provided {fs_type}")
+        
+        def worker_interface_factory():
+            iwi = sdl.ImageWorkerInterface(self.data_fs)
+            return iwi
+        
+        def shard_interface_factory():
+            isi = sdl.ImageShardInterface(self.dist_manager)
+            return isi
+        
+        self.sharded_data_downloader =  sdl.ShardedDataDownloader(
+            worker_interface_factory,
+            shard_interface_factory,
+            self.dist_manager,
+        )
+
     def init_dist_manager(self):
         dm_cfg = self.cfg["dist_manager"]
 

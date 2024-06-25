@@ -15,7 +15,7 @@ import jax.sharding as shrd
 import jax.numpy as jnp
 
 class DistManager:
-    def __init__(self, mesh_shape, credentials_path, bucket_name):
+    def __init__(self, mesh_shape, filesytem):
         self.pid = jax.process_index()
         self.cpu_device = jax.local_devices(backend="cpu")[0]
         self.local_accelerators = jax.local_devices()
@@ -28,9 +28,7 @@ class DistManager:
 
         self.uniform_sharding = shrd.NamedSharding(self.mesh, shrd.PartitionSpec())
 
-        # Initialize GCS client
-        self.client = gcs.Client.from_service_account_json(credentials_path)
-        self.bucket = self.client.bucket(bucket_name)
+        self.filesystem = filesytem
     
     def get_key(self, key):
         uniform_sharding = shrd.NamedSharding(self.mesh, shrd.PartitionSpec())
@@ -100,3 +98,35 @@ class DistManager:
             array = None 
         mhu.sync_global_devices("load_sync")
         return array
+
+    def save_array(self, array, sharding, file_name):
+        if array is not None:
+            local_array = self.gather(sharding, jnp.float32)(array)
+        else:
+            local_array = None
+        
+        # Only have first process actually write to the filesystem
+        if self.pid == 0 and local_array is not None:
+            with self.fs.openbin(file_name, 'w') as blob:
+                blob.write(pkl.dumps(local_array))
+            print(f"Uploaded {file_name} to {type(self.fs).__name__} at {file_name}")
+        mhu.sync_global_devices("save_sync")
+
+    def load_array(self, sharding, file_name):
+        with self.fs.openbin(file_name, 'r') as blob:
+            local_array_pkl = blob.read()
+        local_array = pkl.loads(local_array_pkl)
+        
+        if local_array is not None:
+            array = self.scatter(sharding, jnp.float32)(local_array)
+        else:
+            array = None 
+        mhu.sync_global_devices("load_sync")
+        return array
+    
+    def save_pytree(self, pytree, sharding_pytree, file_name):
+        pass
+    
+    def load_pytree(self, sharding_pytree, file_name):
+        data_pytree = None
+        return data_pytree

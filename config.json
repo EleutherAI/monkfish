@@ -5,6 +5,15 @@
         "dist_manager":{
             "sharding": [8,1,1]
         },
+        "data_loader": {
+            "fs_type": "local",
+            "data_root_directory": "data",
+            "gcp_crendentials_path": "",
+            "gcp_bucket_name": "lvd_test",
+            "workers_per_node": 4,
+            "batch_size": 32,
+            "queue_depth": 10
+        },
         "model": {
             "encoder":{
                 "k":4,
