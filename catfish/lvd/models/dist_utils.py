@@ -73,7 +73,6 @@ class DistManager:
         return cpu_array
 
     def save_array(self, array, sharding, file_name):
-        print(id(self.fs))
         if array is not None:
             local_array = self.gather(sharding, jnp.float32)(array)
         else:

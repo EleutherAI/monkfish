@@ -26,11 +26,32 @@ class DiffAEHarness:
         self.data_loader = None
         self.credentials_path = None
         self.data_fs = None
+        self.ckpt_fs = None
 
         self.parse_args()
+        self.init_fs()
         self.init_dist_manager()
         self.init_data_loader()
         self.make_model()
+
+    def init_fs(self):
+        gcp_conf = self.cfg["gcp"]
+        gcp_credentials_path =  gcp_conf["gcp_credentials_path"]
+        gcp_bucket_name =  gcp_conf["gcp_bucket_name"]
+
+        dl_conf = self.cfg["diffusion_auto_encoder"]["data_loader"]
+        dl_fs_type = dl_conf["fs_type"]
+        root_directory = dl_conf["data_root_directory"]
+
+        if dl_fs_type == "local":
+            self.data_fs = sdl.os_filesystem(root_directory)
+        elif dl_fs_type == "gcp":
+            self.data_fs = self.sdl.os_filesystem(
+                gcp_bucket_name, 
+                root_path=root_directory, 
+                gcp_credentials_path=gcp_credentials_path)
+        else:
+            raise Exception(f"Invalid fs_type provided, provided {fs_type}")
     
     def parse_args(self):
         self.credentials_path = self.args.gcs_json
@@ -39,22 +60,6 @@ class DiffAEHarness:
         self.log_file = self.args.ckpt_path
 
     def init_data_loader(self):
-        dl_conf = self.cfg["diffusion_auto_encoder"]["data_loader"]
-        fs_type = dl_conf["fs_type"]
-        root_directory = dl_conf["data_root_directory"]
-        gcp_credentials_path =  dl_conf["gcp_credentials_path"]
-        gcp_bucket_name =  dl_conf["gcp_bucket_name"]
-
-        if fs_type == "local":
-            self.data_fs = sdl.os_filesystem(root_directory)
-        elif fs_type == "gcp":
-            self.data_fs = self.sdl.os_filesystem(
-                gcp_bucket_name, 
-                root_path=root_directory, 
-                gcp_credentials_path=gcp_credentials_path)
-        else:
-            raise Exception(f"Invalid fs_type provided, provided {fs_type}")
-        
         def worker_interface_factory():
             iwi = sdl.ImageWorkerInterface(self.data_fs)
             return iwi
@@ -125,8 +130,6 @@ class DiffAEHarness:
                pass
     
     def _new_ckpt_path(self):
-
-        pass
     
     def _latest_ckpt_path(self):
         pass
