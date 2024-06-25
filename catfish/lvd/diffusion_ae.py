@@ -103,7 +103,7 @@ class DiffAEHarness:
         
         self.optimizer = optax.adam(lr=opt_cfg["lr"])
         self.state["opt_state"] = self.optimizer.init(self.model)
-    
+
     def save_checkpoint(self, path):
         model_path = os.path.join(path, "model")
         model_encoder_path = os.path.join(model_path, "encoder")
@@ -125,6 +125,7 @@ class DiffAEHarness:
                pass
     
     def _new_ckpt_path(self):
+
         pass
     
     def _latest_ckpt_path(self):
