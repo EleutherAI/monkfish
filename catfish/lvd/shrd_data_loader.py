@@ -1,4 +1,4 @@
-
+import os
 import io
 
 import numpy as np
@@ -17,6 +17,7 @@ import PIL.Image as Image
 
 import mutagen.mp4
 import cv2
+import tempfile
 
 
 def gcp_filesystem(bucket_name, root_path="", credentials_path=None):
@@ -212,32 +213,37 @@ class VideoWorkerInterface:
         file_index = example_id % num_files  # Ensure looping over the videos
         file_name = self.files[file_index]
         
-        # Read the file into a buffer
-        with self.fs.open(file_name, 'rb') as video_file:
-            video_buffer = io.BytesIO(video_file.read())
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
+            temp_path = temp_file.name
+            
+            # Read the file into the temporary file
+            with self.fs.open(file_name, 'rb') as video_file:
+                temp_file.write(video_file.read())
         
-        # Read metadata
-        video_buffer.seek(0)
-        mp4 = mutagen.mp4.MP4(video_buffer)
-        description = mp4.get('\xa9des', [''])[0]  # '©des' is the iTunes description tag
+        try:
+            # Read metadata
+            mp4 = mutagen.mp4.MP4(temp_path)
+            description = mp4.get('\xa9des', [''])[0]  # '©des' is the iTunes description tag
+            
+            # Read video data with OpenCV
+            cap = cv2.VideoCapture(temp_path)
+            
+            frames = []
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames.append(frame)
+            
+            cap.release()
+            video_array = np.array(frames)
+            
+            return (video_array, description), example_id
         
-        # Read video data with OpenCV
-        video_buffer.seek(0)
-        video_bytes = np.asarray(bytearray(video_buffer.read()), dtype=np.uint8)
-        cap = cv2.VideoCapture()
-        cap.open(video_bytes)
-        
-        frames = []
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frames.append(frame)
-        
-        cap.release()
-        video_array = np.array(frames)
-        
-        return (video_array, description), example_id
+        finally:
+            # Clean up the temporary file
+            os.unlink(temp_path)
 
     def list_dir(self):
         """
