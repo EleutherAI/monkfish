@@ -15,6 +15,10 @@ import google.oauth2
 
 import PIL.Image as Image
 
+import mutagen.mp4
+import cv2
+
+
 def gcp_filesystem(bucket_name, root_path="", credentials_path=None):
     if not credentials_path:
         raise ValueError("Credentials path must be provided for authentication.")
@@ -191,19 +195,83 @@ class ImageShardInterface:
 
 class VideoWorkerInterface:
     """Interface to Video data, folder is a dataset, 1 train example per file"""
-    def __init__(self, queue, fs):
-        pass
-    
-    def list_dir():
-        #List all examples in folder
-        pass
-    
+
+    def __init__(self, fs):
+        self.fs = fs
+        self.files = sorted([f for f in self.fs.listdir('/') if f.lower().endswith('.mp4')])
+        if not self.files:
+            raise ValueError("The directory is empty or contains no MP4 files.")
+
     def get_example(self, example_id):
-        #Download and preprocess 1 example
-        pass
-    
-    def upload_example(self, example_id):
-        pass
+        """
+        Fetch a video, process it, and handle looping through videos.
+        `example_id` is used to select the video file.
+        Returns a tuple containing the video as a numpy array and its text description.
+        """
+        num_files = len(self.files)
+        file_index = example_id % num_files  # Ensure looping over the videos
+        file_name = self.files[file_index]
+        
+        # Read the file into a buffer
+        with self.fs.open(file_name, 'rb') as video_file:
+            video_buffer = io.BytesIO(video_file.read())
+        
+        # Read metadata
+        video_buffer.seek(0)
+        mp4 = mutagen.mp4.MP4(video_buffer)
+        description = mp4.get('\xa9des', [''])[0]  # '©des' is the iTunes description tag
+        
+        # Read video data with OpenCV
+        video_buffer.seek(0)
+        video_bytes = np.asarray(bytearray(video_buffer.read()), dtype=np.uint8)
+        cap = cv2.VideoCapture()
+        cap.open(video_bytes)
+        
+        frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames.append(frame)
+        
+        cap.release()
+        video_array = np.array(frames)
+        
+        return (video_array, description), example_id
+
+    def list_dir(self):
+        """
+        List all examples in the folder.
+        """
+        return self.files
+
+    def upload_example(self, example_id, video_array, description):
+        """
+        Upload a processed video back to the filesystem with its description as metadata.
+        """
+        file_name = f'video_{example_id}.mp4'
+        
+        # Create an in-memory buffer
+        buffer = io.BytesIO()
+        
+        # Write video to buffer using OpenCV
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter()
+        out.open(buffer, fourcc, 30, (video_array.shape[2], video_array.shape[1]), True)
+        for frame in video_array:
+            out.write(frame)
+        out.release()
+        
+        # Add metadata
+        buffer.seek(0)
+        mp4 = MP4(buffer)
+        mp4['\xa9des'] = description
+        mp4.save(buffer)
+        
+        # Upload to filesystem
+        buffer.seek(0)
+        with self.fs.open(file_name, 'wb') as fs_file:
+            fs_file.write(buffer.getvalue())
 
 class VideoShardInterface:
     def host_to_accelerator(self, local_data, batch_size):
