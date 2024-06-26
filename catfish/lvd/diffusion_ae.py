@@ -1,8 +1,9 @@
 import os
+import re
 import collections
 
+import fs
 import jax
-
 import optax
 
 import catfish.lvd.models.dist_autoencoding_diffusion as daed
@@ -39,19 +40,36 @@ class DiffAEHarness:
         gcp_credentials_path =  gcp_conf["gcp_credentials_path"]
         gcp_bucket_name =  gcp_conf["gcp_bucket_name"]
 
+        #Initialize data loader file system
         dl_conf = self.cfg["diffusion_auto_encoder"]["data_loader"]
         dl_fs_type = dl_conf["fs_type"]
-        root_directory = dl_conf["data_root_directory"]
+        dl_root_directory = dl_conf["data_root_directory"]
 
         if dl_fs_type == "local":
-            self.data_fs = sdl.os_filesystem(root_directory)
+            self.data_fs = sdl.os_filesystem(dl_root_directory)
         elif dl_fs_type == "gcp":
-            self.data_fs = self.sdl.os_filesystem(
+            self.data_fs = sdl.gcp_filesystem(
                 gcp_bucket_name, 
-                root_path=root_directory, 
+                root_path=dl_root_directory, 
                 gcp_credentials_path=gcp_credentials_path)
         else:
-            raise Exception(f"Invalid fs_type provided, provided {fs_type}")
+            raise Exception(f"Invalid fs_type provided, provided {dl_fs_type}")
+        
+        #Initialize checkpoint filesystem
+        ckpt_conf = self.cfg["diffusion_auto_encoder"]["checkpoints"]
+        ckpt_fs_type = ckpt_conf["fs_type"]
+        ckpt_root_directory = ckpt_conf["data_root_directory"]
+        
+        if ckpt_fs_type == "local":
+            self.ckpt_fs = sdl.os_filesystem(ckpt_root_directory)
+        elif ckpt_fs_type == "gcp":
+            self.ckpt_fs = sdl.gcp_filesystem(
+                gcp_bucket_name, 
+                root_path=ckpt_root_directory, 
+                gcp_credentials_path=gcp_credentials_path)
+        else:
+            raise Exception(f"Invalid fs_type provided, provided {ckpt_root_directory}")
+
     
     def parse_args(self):
         self.credentials_path = self.args.gcs_json
@@ -59,14 +77,24 @@ class DiffAEHarness:
         self.ckpt_path = self.args.ckpt_path
         self.log_file = self.args.ckpt_path
 
-    def init_data_loader(self):
-        def worker_interface_factory():
-            iwi = sdl.ImageWorkerInterface(self.data_fs)
-            return iwi
+    def init_data_loader(self, mode):
+        if mode == "train":
+            def worker_interface_factory():
+                iwi = sdl.ImageWorkerInterface(self.data_fs)
+                return iwi
+            
+            def shard_interface_factory():
+                isi = sdl.ImageShardInterface(self.dist_manager)
+                return isi
         
-        def shard_interface_factory():
-            isi = sdl.ImageShardInterface(self.dist_manager)
-            return isi
+        elif mode == "autoencode":
+            def worker_interface_factory():
+                iwi = sdl.VideoWorkerInterface(self.data_fs)
+                return iwi
+            
+            def shard_interface_factory():
+                isi = sdl.VideoShardInterface(self.dist_manager)
+                return isi
         
         self.sharded_data_downloader =  sdl.ShardedDataDownloader(
             worker_interface_factory,
@@ -109,53 +137,72 @@ class DiffAEHarness:
         self.optimizer = optax.adam(lr=opt_cfg["lr"])
         self.state["opt_state"] = self.optimizer.init(self.model)
 
-    def save_checkpoint(self, path):
-        model_path = os.path.join(path, "model")
-        model_encoder_path = os.path.join(model_path, "encoder")
-        self.model.encoder.save(model_encoder_path)
-        model_decoder_path = os.path.join(model_path, "encoder")
-        self.model.decoder.save(model_decoder_path)
+    def save_checkpoint(self, step):
+        """Save a checkpoint at the given step."""
+        path = self.new_ckpt_path(step)
+        
+        # Ensure the checkpoint directory exists
+        self.ckpt_fs.makedirs(path, recreate=True)
 
-        opt_path = os.path.join(path, "opt_state")
-        for key, value in self.opt_state:
-            if hasattr(value, "save"):
-                opt_state_encoder_path = os.path.join(
-                    opt_path, key, "encoder")
-                value.encoder.save(opt_state_encoder_path)
-                opt_state_decoder_path = os.path.join(
-                    opt_path, key, "encoder")
-                value.encoder.save(opt_state_decoder_path)
-            else:
-               #TODO fix backend 
-               pass
-    
-    def _new_ckpt_path(self):
-    
-    def _latest_ckpt_path(self):
-        pass
-    
-    def load_checkpoint(self, path):
-        model_path = os.path.join(path, "model")
-        model_encoder_path = os.path.join(model_path, "encoder")
-        self.model.encoder.save(model_encoder_path)
-        model_decoder_path = os.path.join(model_path, "encoder")
-        self.model.decoder.save(model_decoder_path)
+        # Save model
+        model_path = f"{path}/model"
+        self.ckpt_fs.makedirs(f"{model_path}/encoder", recreate=True)
+        self.ckpt_fs.makedirs(f"{model_path}/decoder", recreate=True)
+        self.model.encoder.save(f"{model_path}/encoder")
+        self.model.decoder.save(f"{model_path}/decoder")
 
-        opt_path = os.path.join(path, "opt_state")
-        for key, value in self.opt_state:
+        # Save optimizer state
+        opt_path = f"{path}/opt_state"
+        for key, value in self.state["opt_state"].items():
             if hasattr(value, "save"):
-                opt_state_encoder_path = os.path.join(
-                    opt_path, key, "encoder")
-                value.encoder.save(opt_state_encoder_path)
-                opt_state_decoder_path = os.path.join(
-                    opt_path, key, "encoder")
-                value.encoder.save(opt_state_decoder_path)
+                self.ckpt_fs.makedirs(f"{opt_path}/{key}/encoder", recreate=True)
+                self.ckpt_fs.makedirs(f"{opt_path}/{key}/decoder", recreate=True)
+                value.encoder.save(f"{opt_path}/{key}/encoder")
+                value.decoder.save(f"{opt_path}/{key}/decoder")
             else:
-               #TODO fix backend 
-               pass
+                # TODO: Handle other types of optimizer state
+                pass
+    
+    def _list_checkpoints(self):
+        """List all checkpoint directories."""
+        try:
+            directories = [d for d in self.ckpt_fs.listdir('/') if self.ckpt_fs.isdir(d)]
+            checkpoint_dirs = [d for d in directories if d.startswith('ckpt_')]
+            return sorted(checkpoint_dirs, key=lambda x: int(x.split('_')[1]))
+        except fs.errors.ResourceNotFound:
+            return []
+
+    
+    def load_checkpoint(self, path=None):
+        """Load a checkpoint from the given path or the latest if not specified."""
+        if path is None:
+            path = self.latest_ckpt_path()
+        
+        if path is None:
+            raise ValueError("No checkpoint found to load.")
+
+        # Load model
+        model_path = f"{path}/model"
+        self.model.encoder.load(f"{model_path}/encoder")
+        self.model.decoder.load(f"{model_path}/decoder")
+
+        # Load optimizer state
+        opt_path = f"{path}/opt_state"
+        for key, value in self.state["opt_state"].items():
+            if hasattr(value, "load"):
+                value.encoder.load(f"{opt_path}/{key}/encoder")
+                value.decoder.load(f"{opt_path}/{key}/decoder")
+            else:
+                # TODO: Handle other types of optimizer state
+                pass
     
     def most_recent_ckpt(self):
-        pass
+        """Get the most recent checkpoint number."""
+        checkpoints = self._list_checkpoints()
+        if not checkpoints:
+            return 0
+        return int(checkpoints[-1].split('_')[1])
+
 
     def new_ckpt_path(self, id):
         ckpt_n = self.most_recent_ckpt()
@@ -166,35 +213,35 @@ class DiffAEHarness:
         assert id == new_ckpt_n
 
         os.path.join(self.args.ckpt_path,"ckpt_path")
-    
+
     def latest_ckpt_path(self):
-        #TODO:
-        pass
+        """Get the path of the latest checkpoint."""
+        checkpoints = self._list_checkpoints()
+        if not checkpoints:
+            return None
+        return f'/{checkpoints[-1]}'
     
     def train(self):
         args = self.args
         cfg = self.cfg
 
-        ckpt_freq = self.cfg["diffusion_autoencoder"]["train"]["ckpt_freq"]
+        ckpt_freq = cfg["diffusion_auto_encoder"]["train"]["ckpt_freq"]
 
-        state = (self.model, self.opt_state, self.prng_key)
-
-        def loss_fn(model, data, subkey):
-            latent = model.encoder(data)
-            diffusion_data = (latent, data)
-            loss = dc.diffusion_loss(
-                model.decoder, diffusion_data, dc.f_neg_gamma, subkey)
-            return loss
-        
-        checkpoint = args.ckpt
-        if checkpoint is None:
-            state = (self.model, self.opt_state, self.prng_key)
+        if args.ckpt:
+            self.load_checkpoint(args.ckpt)
         else:
-            load_checkpoint
-        
+            self.load_checkpoint()  # Attempt to load the latest checkpoint
+
+        step = self.most_recent_ckpt()
+
         for data in self.data_loader:
-            loss, state = dc.update(state, data, self.optimizer, loss_fn)
-            print(loss)
+            step += 1
+            loss, self.state = dc.update(self.state, data, self.optimizer, self.loss_fn)
+            print(f"Step {step}, Loss: {loss}")
+
+            if step % ckpt_freq == 0:
+                self.save_checkpoint(step)
+
 
     def autoencode(self):
         args = self.args
