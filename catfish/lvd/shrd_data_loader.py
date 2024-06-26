@@ -39,8 +39,100 @@ def os_filesystem(root_path="/"):
     return local_fs
 
 class ShardedDataUploader:
-    def __init__(self, worker_interface_factory, shard_interface_factory, counter, dist_manager, workers_per_node=1):
-        pass
+    def __init__(self, worker_interface_factory, shard_interface_factory, dist_manager, 
+                 workers_per_node=1, batch_size=32, queue_depth=5):
+        assert batch_size % dist_manager.nodes == 0
+
+        # Initialize attributes
+        self.workers_per_node = workers_per_node
+        self.batch_size = batch_size
+        self.queue_depth = queue_depth
+        self.dist_manager = dist_manager
+        self.pid = dist_manager.pid
+        self.nodes = dist_manager.nodes
+        self.worker_interface_factory = worker_interface_factory
+        self.shard_interface_factory = shard_interface_factory
+
+        self.shard_interface = self.shard_interface_factory()
+
+        self.counter = None
+        self.round_robin_index = None
+
+        self.stop_event = None
+        self.workers = []
+        self.queues = []
+
+        self.processed = False
+
+    def start(self, counter):
+        self.counter = counter
+        self.round_robin_index = 0
+
+        self.stop_event = multiprocessing.Event()
+        for i in range(self.workers_per_node):
+            start_index = self.counter + i*self.nodes + self.pid
+
+            queue = multiprocessing.Queue(maxsize=self.queue_depth)
+            worker = multiprocessing.Process(
+                target=self._worker, args=(
+                    start_index, queue, self.stop_event
+                )
+            )
+
+            self.queues.append(queue)
+            self.workers.append(worker)
+            worker.start()
+        
+        self.processed = True
+
+    def stop(self):
+        self.stop_event.set()
+
+        # Empty queues to unblock workers trying to get items
+        while any(not queue.empty() for queue in self.queues):
+            for queue in self.queues:
+                try:
+                    queue.get_nowait()
+                except multiprocessing.queues.Empty:
+                    continue
+        
+        for worker in self.workers:
+            worker.join()
+        
+        self.queues = None
+        self.stop_event = None
+
+    def _worker(self, start_index, queue, stop_event):
+        counter = start_index
+        worker_interface = self.worker_interface_factory()
+        
+        while(not stop_event.is_set()):
+            example, _ = queue.get()
+            worker_interface.upload_example(counter, example)
+            counter += self.workers_per_node*self.nodes
+
+    def step(self, accelerator_data):
+        assert self.processed
+
+        local_batch_data = self.shard_interface.accelerator_to_host(accelerator_data)
+
+        round_robin_index = self.round_robin_index
+        for i, data in enumerate(local_batch_data):
+            sub_batch_index = self.round_robin_index + i
+            round_robin_index = sub_batch_index % self.workers_per_node
+
+            self.queues[round_robin_index].put((data, None))
+
+        self.processed = False
+
+        return len(local_batch_data)
+
+    def ack(self):
+        assert (not self.processed)
+        self.counter += self.batch_size
+        self.round_robin_index += self.batch_size // self.nodes
+        self.round_robin_index %= self.workers_per_node
+        self.processed = True
 
 class ShardedDataDownloader:
     def __init__(self, worker_interface_factory, shard_interface_factory, dist_manager, 

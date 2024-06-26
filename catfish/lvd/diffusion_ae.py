@@ -4,7 +4,9 @@ import collections
 
 import fs
 import jax
+import jax.numpy as jnp
 import optax
+import pickle as pkl
 
 import catfish.lvd.models.dist_autoencoding_diffusion as daed
 import catfish.lvd.models.dist_utils as du
@@ -246,11 +248,15 @@ class DiffAEHarness:
             return None
         return f'/{checkpoints[-1]}'
     
+
     def train(self):
         args = self.args
         cfg = self.cfg
 
-        ckpt_freq = cfg["diffusion_auto_encoder"]["train"]["ckpt_freq"]
+        train_cfg = cfg["diffusion_auto_encoder"]["train"]
+        ckpt_freq = train_cfg["ckpt_freq"]
+        total_steps = train_cfg["total_steps"]
+        log_freq = train_cfg["log_freq"]
 
         if args.ckpt:
             self.load_checkpoint(args.ckpt)
@@ -259,13 +265,45 @@ class DiffAEHarness:
 
         step = self.most_recent_ckpt()
 
-        for data in self.data_loader:
-            step += 1
-            loss, self.state = dc.update(self.state, data, self.optimizer, self.loss_fn)
-            print(f"Step {step}, Loss: {loss}")
+        # Initialize the data downloader
+        self.sharded_data_downloader.start(step * self.sharded_data_downloader.batch_size)
 
-            if step % ckpt_freq == 0:
-                self.save_checkpoint(step)
+        try:
+            total_loss = 0
+            log_start_step = step
+            while step < total_steps:
+                step += 1
+                
+                # Get data from the downloader
+                data = self.sharded_data_downloader.step()
+
+                # Update the model
+                loss, self.state = dc.update(self.state, data, self.optimizer, self.loss_fn)
+
+                # Accumulate loss
+                total_loss += loss
+
+                # Acknowledge that we've processed the data
+                self.sharded_data_downloader.ack()
+
+                if step % log_freq == 0:
+                    avg_loss = total_loss / (step - log_start_step)
+                    print(f"Step {step}, Average Loss: {avg_loss:.4f}")
+                    # Reset for next logging interval
+                    total_loss = 0
+                    log_start_step = step
+
+                if step % ckpt_freq == 0:
+                    self.save_checkpoint(step)
+
+        except KeyboardInterrupt:
+            print("Training interrupted. Saving checkpoint...")
+            self.save_checkpoint(step)
+        finally:
+            # Always stop the data downloader when we're done
+            self.sharded_data_downloader.stop()
+
+        print("Training completed.")
 
     def autoencode(self):
         args = self.args
