@@ -2,7 +2,7 @@
     "seed": 42,
     "gcp":{
         "gcp_crendentials_path": "",
-        "gcp_bucket_name": "lvd_test",
+        "gcp_bucket_name": "lvd_test"
     },
     "diffusion_auto_encoder":{
         "resolution": [512, 256],
