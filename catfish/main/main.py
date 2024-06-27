@@ -1,93 +1,84 @@
 import argparse
 
-import latentvideodiffusion as lvd
-import latentvideodiffusion.utils
-import latentvideodiffusion.vae
-import latentvideodiffusion.diffusion
-import latentvideodiffusion.plot
+import catfish.lvd.diffusion_ae as dae
+import catfish.lvd.diffusion_ar as dar
+
+
+import argparse
+import json
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Train and Generate Visualizations using VAE and Diffusion Transformer.')
-    parser.add_argument('--config_file', type=str, required=True,
-                        help='Path to the configuration file.')
-    subparsers = parser.add_subparsers()
+    parser = argparse.ArgumentParser(description="Sharded/distributed training tool for video generative model")
 
-    # Training arguments for Diffusion Transformer
-    train_diffusion_parser = subparsers.add_parser('train_diffusion')
-    train_diffusion_parser.set_defaults(func=train_diffusion)
-    train_diffusion_parser.add_argument('--checkpoint', type=int, default=None,
-                                        help='Checkpoint iteration to load state from.')
-    train_diffusion_parser.add_argument('--data_dir', type=str, required=True,
-                                        help='Directory path for Diffusion Transformer training data.')
+    # Required arguments
+    parser.add_argument("config", help="Path to configuration file (JSON)")
+    parser.add_argument("mode", choices=["local", "distributed"], help="Mode of operation: local (single node) or distributed (multinode)")
 
-    # Training arguments for VAE
-    train_vae_parser = subparsers.add_parser('train_vae')
-    train_vae_parser.set_defaults(func=train_vae)
-    train_vae_parser.add_argument('--checkpoint', type=str, default=None,
-                                  help='Checkpoint iteration to load state from.')
+    # Subparsers for different operations
+    subparsers = parser.add_subparsers(dest="operation", required=True, help="Operation to perform")
 
-    # Sampling arguments for Diffusion Transformer
-    sample_diffusion_parser = subparsers.add_parser('sample_diffusion')
-    sample_diffusion_parser.set_defaults(func=sample_diffusion)
-    sample_diffusion_parser.add_argument('--vae_checkpoint', type=str, required=True,
-                                 help='VAE checkpoint iteration to load state from.')
-    sample_diffusion_parser.add_argument('--diffusion_checkpoint', type=str, required=True,
-                                 help='Diffusion Transformer checkpoint iteration to load state from.')
-    sample_diffusion_parser.add_argument('--data_dir', type=str, required=True,
-                                 help='Directory with video latents')
+    # Training diffusion autoencoder
+    subparsers.add_parser("train_dae", help="Train the diffusion autoencoder")
     
-    # Sampling arguments for VAE
-    sample_vae_parser = subparsers.add_parser('sample_vae')
-    sample_vae_parser.set_defaults(func=sample_vae)
-    sample_vae_parser.add_argument('--checkpoint', type=str, required=True,
-                                         help='Checkpoint iteration to load state from.')
+    # Lifting videos
+    lift_parser = subparsers.add_parser("lift", help="Lift videos into the diffusion latent space")
+    lift_parser.add_argument("input_videos", nargs="+", help="Input video files")
 
-    # Encoding arguments
-    encode_parser = subparsers.add_parser('encode')
-    encode_parser.set_defaults(func=encode_frames)
-    encode_parser.add_argument('--vae_checkpoint', type=str, required=True,
-                               help='VAE checkpoint iteration to load state from.')
-    encode_parser.add_argument('--input_dir', type=str, required=True,
-                               help='Directory path for input videos to be encoded.')
-    encode_parser.add_argument('--output_dir', type=str, required=True,
-                               help='Directory path to write encoded frames for Diffusion Transformer training.')
+    # Training autoregressive diffusion model
+    subparsers.add_parser("train_adm", help="Train the autoregressive diffusion model")
 
-    # Loss Plotting arguments
-    plot_loss_parser = subparsers.add_parser('plot_loss')
-    plot_loss_parser.set_defaults(func=plot_loss)
-    plot_loss_parser.add_argument('--type', type=str, required=True,
-                               help='The loss to plot, can either be "vae" or "dt"')
-    
-    args = parser.parse_args()
-    return args
+    # Reconstructing static test image
+    reconstruct_parser = subparsers.add_parser("reconstruct", help="Reconstruct a static test image")
+    reconstruct_parser.add_argument("input_image", help="Input image file")
+
+    # Sampling
+    sample_parser = subparsers.add_parser("sample", help="Sample a video using both models")
+    sample_parser.add_argument("--text_prompt", help="Text prompt for sampling")
+    sample_parser.add_argument("--image_prompt", help="Image prompt for sampling")
+    sample_parser.add_argument("--video_prompt", help="Video prompt for sampling")
+
+    return parser.parse_args()
+
+def read_config(config_path):
+    with open(config_path, 'r') as f:
+        return json.load(f)
 
 def main():
     args = parse_args()
-    args.func(args)
+    config = read_config(args.config)
 
-def train_vae(args):
-    cfg = lvd.utils.load_config(args.config_file)
-    lvd.vae.train(args, cfg)
+    # Process the arguments and call appropriate functions
+    if args.operation == "train_dae":
+        train_diffusion_autoencoder(config, args.mode)
+    elif args.operation == "lift":
+        lift_videos(config, args.mode, args.input_videos)
+    elif args.operation == "train_adm":
+        train_autoregressive_diffusion_model(config, args.mode)
+    elif args.operation == "reconstruct":
+        reconstruct_image(config, args.mode, args.input_image)
+    elif args.operation == "sample":
+        sample_video(config, args.mode, args.text_prompt, args.image_prompt, args.video_prompt)
 
-def train_diffusion(args):
-    cfg = lvd.utils.load_config(args.config_file)
-    lvd.diffusion.train(args, cfg)
+def train_diffusion_autoencoder(config, mode):
+    print(f"Training diffusion autoencoder with config {config} in {mode} mode")
 
-def sample_vae(args):
-    cfg = lvd.utils.load_config(args.config_file)
-    lvd.vae.sample(args, cfg)
+def lift_videos(config, mode, input_videos):
+    print(f"Lifting videos {input_videos} with config {config} in {mode} mode")
 
-def sample_diffusion(args):
-    cfg = lvd.utils.load_config(args.config_file)
-    lvd.diffusion.sample(args, cfg)
+def train_autoregressive_diffusion_model(config, mode):
+    print(f"Training autoregressive diffusion model with config {config} in {mode} mode")
 
-def encode_frames(args):
-    cfg = lvd.utils.load_config(args.config_file)
-    lvd.utils.encode_frames(args, cfg)
+def reconstruct_image(config, mode, input_image):
+    print(f"Reconstructing image {input_image} with config {config} in {mode} mode")
 
-def plot_loss(args):
-    cfg = lvd.utils.load_config(args.config_file)
-    lvd.plot.plot_loss(args, cfg)
+def sample_video(config, mode, text_prompt, image_prompt, video_prompt):
+    print(f"Sampling video with config {config} in {mode} mode")
+    if text_prompt:
+        print(f"Using text prompt: {text_prompt}")
+    elif image_prompt:
+        print(f"Using image prompt: {image_prompt}")
+    elif video_prompt:
+        print(f"Using video prompt: {video_prompt}")
 
 if __name__ == "__main__":
     main()
