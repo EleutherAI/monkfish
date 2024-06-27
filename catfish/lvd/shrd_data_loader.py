@@ -1,5 +1,7 @@
 import os
 import io
+import sys
+import time
 
 import numpy as np
 
@@ -88,13 +90,9 @@ class ShardedDataUploader:
     def stop(self):
         self.stop_event.set()
 
-        # Empty queues to unblock workers trying to get items
+        # Wait for queues to drain before shutting down workers
         while any(not queue.empty() for queue in self.queues):
-            for queue in self.queues:
-                try:
-                    queue.get_nowait()
-                except multiprocessing.queues.Empty:
-                    continue
+            time.sleep(0.1)
         
         for worker in self.workers:
             worker.join()
@@ -103,13 +101,28 @@ class ShardedDataUploader:
         self.stop_event = None
 
     def _worker(self, start_index, queue, stop_event):
+        """
+        def write_to_file(filename, content):
+            with open(filename, 'a') as file:
+                file.write(content)
+        """
         counter = start_index
         worker_interface = self.worker_interface_factory()
         
-        while(not stop_event.is_set()):
+        while not stop_event.is_set():
+            try:
+                # Add a timeout to allow checking stop_event
+                example, _ = queue.get(timeout=0.2)
+                worker_interface.upload_example(counter, example)
+                counter += self.workers_per_node * self.nodes
+            except multiprocessing.queues.Empty:
+                continue
+        
+        #Drain remaining queue once stop signal is sent
+        while not queue.empty():
             example, _ = queue.get()
             worker_interface.upload_example(counter, example)
-            counter += self.workers_per_node*self.nodes
+            counter += self.workers_per_node * self.nodes
 
     def step(self, accelerator_data):
         assert self.processed
