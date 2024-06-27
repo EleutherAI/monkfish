@@ -1,18 +1,15 @@
 import argparse
+import json
 
 import catfish.lvd.diffusion_ae as dae
 import catfish.lvd.diffusion_ar as dar
-
-
-import argparse
-import json
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Sharded/distributed training tool for video generative model")
 
     # Required arguments
     parser.add_argument("config", help="Path to configuration file (JSON)")
-    parser.add_argument("mode", choices=["local", "distributed"], help="Mode of operation: local (single node) or distributed (multinode)")
+    parser.add_argument("mode", choices=["local", "distributed", "swarm"], help="Mode of operation: local (single node), distributed (multinode), or swarm")
 
     # Subparsers for different operations
     subparsers = parser.add_subparsers(dest="operation", required=True, help="Operation to perform")
@@ -49,36 +46,139 @@ def main():
 
     # Process the arguments and call appropriate functions
     if args.operation == "train_dae":
-        train_diffusion_autoencoder(config, args.mode)
+        train_diffusion_autoencoder(config, args)
     elif args.operation == "lift":
-        lift_videos(config, args.mode, args.input_videos)
+        lift_videos(config, args)
     elif args.operation == "train_adm":
-        train_autoregressive_diffusion_model(config, args.mode)
+        train_autoregressive_diffusion_model(config, args)
     elif args.operation == "reconstruct":
-        reconstruct_image(config, args.mode, args.input_image)
+        reconstruct_image(config, args)
     elif args.operation == "sample":
-        sample_video(config, args.mode, args.text_prompt, args.image_prompt, args.video_prompt)
+        sample_video(config, args)
 
-def train_diffusion_autoencoder(config, mode):
-    print(f"Training diffusion autoencoder with config {config} in {mode} mode")
+def train_diffusion_autoencoder(config, args):
+    print(f"Training diffusion autoencoder with config {config} in {args.mode} mode")
 
-def lift_videos(config, mode, input_videos):
-    print(f"Lifting videos {input_videos} with config {config} in {mode} mode")
+    def actor_factory():
+        return dae.DiffAEHarness(
+            # Add necessary parameters from config
+        )
 
-def train_autoregressive_diffusion_model(config, mode):
-    print(f"Training autoregressive diffusion model with config {config} in {mode} mode")
+    backend = config.get("backend", "cpu")
+    if args.mode == "local":
+        if backend == "tpu":
+            # TODO: Implement local TPU training
+            pass
+        elif backend == "gpu":
+            # TODO: Implement local GPU training
+            pass
+        else:
+            # TODO: Implement local CPU training
+            pass
+    elif args.mode == "distributed":
+        if backend == "tpu":
+            # TODO: Implement distributed TPU training
+            pass
+        elif backend == "gpu":
+            # TODO: Implement distributed GPU training
+            pass
+        else:
+            # TODO: Implement distributed CPU training
+            pass
+    elif args.mode == "swarm":
+        # TODO: Implement swarm training
+        pass
+    else:
+        print(f"Mode {args.mode} and backend {backend} is not supported for train_dae")
 
-def reconstruct_image(config, mode, input_image):
-    print(f"Reconstructing image {input_image} with config {config} in {mode} mode")
+def lift_videos(config, args):
+    print(f"Lifting videos {args.input_videos} with config {config} in {args.mode} mode")
 
-def sample_video(config, mode, text_prompt, image_prompt, video_prompt):
-    print(f"Sampling video with config {config} in {mode} mode")
-    if text_prompt:
-        print(f"Using text prompt: {text_prompt}")
-    elif image_prompt:
-        print(f"Using image prompt: {image_prompt}")
-    elif video_prompt:
-        print(f"Using video prompt: {video_prompt}")
+    backend = config.get("backend", "cpu")
+    if args.mode == "local":
+        # TODO: Implement local video lifting
+        pass
+    elif args.mode == "distributed":
+        # TODO: Implement distributed video lifting
+        pass
+    elif args.mode == "swarm":
+        # TODO: Implement swarm video lifting
+        pass
+    else:
+        print(f"Mode {args.mode} is not supported for lift_videos")
+
+def train_autoregressive_diffusion_model(config, args):
+    print(f"Training autoregressive diffusion model with config {config} in {args.mode} mode")
+
+    def actor_factory():
+        return dar.DiffARHarness(
+            # Add necessary parameters from config
+        )
+
+    backend = config.get("backend", "cpu")
+    if args.mode == "local":
+        if backend == "tpu":
+            # TODO: Implement local TPU training
+            pass
+        elif backend == "gpu":
+            # TODO: Implement local GPU training
+            pass
+        else:
+            # TODO: Implement local CPU training
+            pass
+    elif args.mode == "distributed":
+        if backend == "tpu":
+            # TODO: Implement distributed TPU training
+            pass
+        elif backend == "gpu":
+            # TODO: Implement distributed GPU training
+            pass
+        else:
+            # TODO: Implement distributed CPU training
+            pass
+    elif args.mode == "swarm":
+        # TODO: Implement swarm training
+        pass
+    else:
+        print(f"Mode {args.mode} and backend {backend} is not supported for train_adm")
+
+def reconstruct_image(config, args):
+    print(f"Reconstructing image {args.input_image} with config {config} in {args.mode} mode")
+
+    backend = config.get("backend", "cpu")
+    if args.mode == "local":
+        # TODO: Implement local image reconstruction
+        pass
+    elif args.mode == "distributed":
+        # TODO: Implement distributed image reconstruction
+        pass
+    elif args.mode == "swarm":
+        # TODO: Implement swarm image reconstruction
+        pass
+    else:
+        print(f"Mode {args.mode} is not supported for reconstruct_image")
+
+def sample_video(config, args):
+    print(f"Sampling video with config {config} in {args.mode} mode")
+    if args.text_prompt:
+        print(f"Using text prompt: {args.text_prompt}")
+    elif args.image_prompt:
+        print(f"Using image prompt: {args.image_prompt}")
+    elif args.video_prompt:
+        print(f"Using video prompt: {args.video_prompt}")
+
+    backend = config.get("backend", "cpu")
+    if args.mode == "local":
+        # TODO: Implement local video sampling
+        pass
+    elif args.mode == "distributed":
+        # TODO: Implement distributed video sampling
+        pass
+    elif args.mode == "swarm":
+        # TODO: Implement swarm video sampling
+        pass
+    else:
+        print(f"Mode {args.mode} is not supported for sample_video")
 
 if __name__ == "__main__":
     main()

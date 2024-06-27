@@ -72,13 +72,6 @@ class DiffAEHarness:
         else:
             raise Exception(f"Invalid fs_type provided, provided {ckpt_root_directory}")
 
-    
-    def parse_args(self):
-        self.credentials_path = self.args.gcs_json
-        self.gcs_bucket = self.args.gcs_bucket
-        self.ckpt_path = self.args.ckpt_path
-        self.log_file = self.args.ckpt_path
-
     def init_data_loader(self, mode):
         if mode == "train":
             def worker_interface_factory():
