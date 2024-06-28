@@ -2,7 +2,7 @@ import argparse
 import json
 
 import catfish.lvd.diffusion_ae as dae
-import catfish.lvd.diffusion_ar as dar
+#import catfish.lvd.diffusion_ar as dar
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Sharded/distributed training tool for video generative model")
@@ -59,7 +59,7 @@ def main():
 def train_diffusion_autoencoder(config, args):
     print(f"Training diffusion autoencoder with config {config} in {args.mode} mode")
 
-    def dae_factory():
+    def dae_harness_factory():
         return dae.DiffAEHarness(
             args,
             config
@@ -68,8 +68,8 @@ def train_diffusion_autoencoder(config, args):
     backend = config["backend"]
     if args.mode == "local":
         if backend == "tpu":
-            dae = dae_factory()
-            dae.train()
+            dae_harness = dae_harness_factory()
+            dae_harness.train()
         elif backend == "gpu":
             # TODO: Implement local GPU training
             raise NotImplementedError()

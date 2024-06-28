@@ -14,7 +14,7 @@ import catfish.lvd.shrd_data_loader as sdl
 import catfish.lvd.diffusion_core as dc
 
 
-DAEModel = collections.namedtuple(["encoder", "decoder"])
+DAEModel = collections.namedtuple('DAEModel', ['encoder', 'decoder'])
 
 class DiffAEHarness:
     """Sharded Diffusion autoencoder harness"""
@@ -36,6 +36,9 @@ class DiffAEHarness:
         self.init_dist_manager()
         self.init_data_loader()
         self.make_model()
+
+    def parse_args(self):
+        pass
 
     def init_fs(self):
         gcp_conf = self.cfg["gcp"]
@@ -60,7 +63,7 @@ class DiffAEHarness:
         #Initialize checkpoint filesystem
         ckpt_conf = self.cfg["diffusion_auto_encoder"]["checkpoints"]
         ckpt_fs_type = ckpt_conf["fs_type"]
-        ckpt_root_directory = ckpt_conf["data_root_directory"]
+        ckpt_root_directory = ckpt_conf["ckpt_root_directory"]
         
         if ckpt_fs_type == "local":
             self.ckpt_fs = sdl.os_filesystem(ckpt_root_directory)
@@ -72,8 +75,11 @@ class DiffAEHarness:
         else:
             raise Exception(f"Invalid fs_type provided, provided {ckpt_root_directory}")
 
-    def init_data_loader(self, mode):
-        if mode == "train":
+    def init_data_loader(self):
+        operation = self.args.operation
+        print(operation)
+
+        if operation == "train_dae":
             def worker_interface_factory():
                 iwi = sdl.ImageWorkerInterface(self.data_fs)
                 return iwi
@@ -82,7 +88,7 @@ class DiffAEHarness:
                 isi = sdl.ImageShardInterface(self.dist_manager)
                 return isi
         
-        elif mode == "autoencode":
+        elif operation == "autoencode":
             def worker_interface_factory():
                 iwi = sdl.VideoWorkerInterface(self.data_fs)
                 return iwi
@@ -90,6 +96,9 @@ class DiffAEHarness:
             def shard_interface_factory():
                 isi = sdl.VideoShardInterface(self.dist_manager)
                 return isi
+        else:
+            raise ValueError(f"Unsupported operation {operation}")
+
         
         self.sharded_data_downloader =  sdl.ShardedDataDownloader(
             worker_interface_factory,
@@ -98,16 +107,18 @@ class DiffAEHarness:
         )
 
     def init_dist_manager(self):
-        dm_cfg = self.cfg["dist_manager"]
+        dm_cfg = self.cfg["diffusion_auto_encoder"]["dist_manager"]
 
         mesh_shape = dm_cfg["mesh_shape"]
 
-        self.dist_manager = du.DistManager(mesh_shape, self.credientials_path)
+        self.dist_manager = du.DistManager(mesh_shape, self.ckpt_fs)
     
     def make_model(self):
-        model_conf = self.conf["diffusion_auto_encoder"]["model"]
+        model_conf = self.cfg["diffusion_auto_encoder"]["model"]
         enc_conf = model_conf["encoder"]
         dec_conf = model_conf["decoder"]
+
+        key = self.cfg["seed"]
         
         self.state["prng_key"], enc_key, dec_key = jax.random.split(self.state["prng_key"],3)
 

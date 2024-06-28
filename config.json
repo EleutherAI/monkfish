@@ -2,7 +2,7 @@
     "seed": 42,
     "backend": "tpu",
     "gcp":{
-        "gcp_crendentials_path": "",
+        "gcp_credentials_path": "",
         "gcp_bucket_name": "lvd_test"
     },
     "s3":{},
@@ -14,11 +14,11 @@
     "diffusion_auto_encoder":{
         "resolution": [512, 256],
         "dist_manager":{
-            "sharding": [8,1,1]
+            "mesh_shape": [8,1,1]
         },
         "data_loader": {
             "fs_type": "local",
-            "data_root_directory": "image_data",
+            "data_root_directory": "../dummy_image_data",
             "workers_per_node": 4,
             "batch_size": 32,
             "queue_depth": 10
@@ -40,7 +40,7 @@
         },
         "checkpoints": {
             "fs_type": "local",
-            "ckpt_root_directory": "checkpoints"
+            "ckpt_root_directory": "../checkpoints"
         }
     },
     "transformer_ardm":{

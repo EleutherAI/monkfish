@@ -17,6 +17,7 @@ import jax.numpy as jnp
 class DistManager:
     def __init__(self, mesh_shape, filesystem):
         self.pid = jax.process_index()
+        self.nodes = jax.process_count()
         self.cpu_device = jax.local_devices(backend="cpu")[0]
         self.local_accelerators = jax.local_devices()
 
