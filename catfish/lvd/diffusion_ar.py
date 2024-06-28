@@ -1,90 +1,300 @@
-def sample_datapoint(data, key):
-    prompt_key, completion_key = jax.random.split(key)
-    
-    prompt_dist, completion_dist = data
-    prompt_sample = lvd.vae.sample_gaussian(prompt_dist, prompt_key)
-    completion_sample = lvd.vae.sample_gaussian(prompt_dist,completion_key)
-    return prompt_sample,completion_sample
+import os
+import re
+import collections
 
-def sample(args, cfg):
-    n_samples = cfg["dt"]["sample"]["n_sample"]
-    n_steps = cfg["dt"]["sample"]["n_steps"]
-    n_latent = cfg["lvm"]["n_latent"]
-    l_x = cfg["dt"]["l_x"]
-    l_y = cfg["dt"]["l_y"]
+import fs
+import jax
+import jax.numpy as jnp
+import optax
+import pickle as pkl
 
-    with jax.default_device(jax.devices("cpu")[0]):
-
-        vae_state = lvd.utils.load_checkpoint(args.vae_checkpoint)
-        trained_vae = vae_state[0]
-        m_encoder, m_decoder = map(lambda x: jax.vmap(jax.vmap(x)), trained_vae)
-
-        dt_state = lvd.utils.load_checkpoint(args.diffusion_checkpoint)
-        trained_dt = dt_state[0]
+import catfish.lvd.models.dist_autoencoding_diffusion as daed
+import catfish.lvd.models.dist_utils as du
+import catfish.lvd.shrd_data_loader as sdl
+import catfish.lvd.diffusion_core as dc
 
 
-        key = jax.random.PRNGKey(cfg["seed"])
+DAEModel = collections.namedtuple(["encoder", "decoder"])
 
-        data_key, dt_sample_key, encode_sample_key, decode_sample_key = jax.random.split(key, 4)
+class DiffARHarness:
+    """Sharded Diffusion autoencoder harness"""
 
-        with lvd.latent_dataset.LatentDataset(data_directory=args.data_dir, 
-            batch_size=n_samples, prompt_length=l_x, completion_length=l_y) as ld:
-            prompt_samples, completion_samples = sample_datapoint(next(ld), data_key)
+    def __init__(self, args, cfg):
+        self.args = args
+        self.cfg = cfg
+        self.state = {}
+        self.optimizer = None
+        self.prng_key = None
+        self.dist_manager = None
+        self.data_loader = None
+        self.credentials_path = None
+        self.data_fs = None
+        self.ckpt_fs = None
 
-        latent_continuations = sample_diffusion(prompt_samples, trained_dt, f_neg_gamma, dt_sample_key, n_steps, completion_samples.shape[1:])
+        self.parse_args()
+        self.init_fs()
+        self.init_dist_manager()
+        self.init_data_loader()
+        self.make_model()
 
-        continuation_frames = lvd.vae.sample_gaussian(m_decoder(latent_continuations), decode_sample_key)
-        print(continuation_frames.shape)
+    def init_fs(self):
+        gcp_conf = self.cfg["gcp"]
+        gcp_credentials_path =  gcp_conf["gcp_credentials_path"]
+        gcp_bucket_name =  gcp_conf["gcp_bucket_name"]
+
+        #Initialize data loader file system
+        dl_conf = self.cfg["diffusion_auto_encoder"]["data_loader"]
+        dl_fs_type = dl_conf["fs_type"]
+        dl_root_directory = dl_conf["data_root_directory"]
+
+        if dl_fs_type == "local":
+            self.data_fs = sdl.os_filesystem(dl_root_directory)
+        elif dl_fs_type == "gcp":
+            self.data_fs = sdl.gcp_filesystem(
+                gcp_bucket_name, 
+                root_path=dl_root_directory, 
+                gcp_credentials_path=gcp_credentials_path)
+        else:
+            raise Exception(f"Invalid fs_type provided, provided {dl_fs_type}")
         
-        for sample in continuation_frames:
-            print(sample.shape)
-            lvd.utils.show_samples(sample)
+        #Initialize checkpoint filesystem
+        ckpt_conf = self.cfg["diffusion_auto_encoder"]["checkpoints"]
+        ckpt_fs_type = ckpt_conf["fs_type"]
+        ckpt_root_directory = ckpt_conf["data_root_directory"]
+        
+        if ckpt_fs_type == "local":
+            self.ckpt_fs = sdl.os_filesystem(ckpt_root_directory)
+        elif ckpt_fs_type == "gcp":
+            self.ckpt_fs = sdl.gcp_filesystem(
+                gcp_bucket_name, 
+                root_path=ckpt_root_directory, 
+                gcp_credentials_path=gcp_credentials_path)
+        else:
+            raise Exception(f"Invalid fs_type provided, provided {ckpt_root_directory}")
 
-def train(args, cfg):
-    key = jax.random.PRNGKey(cfg["seed"])
-    ckpt_dir = cfg["dt"]["train"]["ckpt_dir"]
-    lr = cfg["dt"]["train"]["lr"]
-    ckpt_interval = cfg["dt"]["train"]["ckpt_interval"]
-    latent_paths = cfg["dt"]["train"]["data_dir"]
-    batch_size = cfg["dt"]["train"]["bs"]
-    clip_norm = cfg["dt"]["train"]["clip_norm"]
-    metrics_path = cfg["dt"]["train"]["metrics_path"]
+    def init_data_loader(self, mode):
+        if mode == "train":
+            def worker_interface_factory():
+                lwi = sdl.LatentWorkerInterface(self.data_fs)
+                return lwi
+            
+            def shard_interface_factory():
+                lwi = sdl.ImageShardInterface(self.dist_manager)
+                return lwi
+        
+        self.sharded_data_downloader =  sdl.ShardedDataDownloader(
+            worker_interface_factory,
+            shard_interface_factory,
+            self.dist_manager,
+        )
 
-    n_layers = cfg["dt"]["n_layers"]
-    d_io = cfg["lvm"]["n_latent"]
-    d_l = cfg["dt"]["d_l"]
-    d_mlp = cfg["dt"]["d_mlp"]
-    n_q = cfg["dt"]["n_q"]
-    d_qk = cfg["dt"]["d_qk"]
-    d_dv = cfg["dt"]["d_dv"]
-    l_x = cfg["dt"]["l_x"]
-    l_y = cfg["dt"]["l_y"]
+    def init_dist_manager(self):
+        dm_cfg = self.cfg["dist_manager"]
 
-    adam_optimizer = optax.adam(lr)
-    optimizer = optax.chain(adam_optimizer, optax.zero_nans(), optax.clip_by_global_norm(clip_norm))
-    loss_fn = lambda a, b, c: diffusion_loss(a, b, f_neg_gamma, c)
+        mesh_shape = dm_cfg["mesh_shape"]
+
+        self.dist_manager = du.DistManager(mesh_shape, self.credientials_path)
     
-    if args.checkpoint is None:
-        key = jax.random.PRNGKey(cfg["seed"])
-        init_key, state_key = jax.random.split(key)
-        model = diffusion_transformer.LatentVideoTransformer(init_key, n_layers, d_io, d_l, d_mlp, n_q, d_qk, d_dv)
-        opt_state = optimizer.init(model)
-        i = 0
-        state = model, opt_state, state_key, i
-    else:
-        checkpoint_path = args.checkpoint
-        state = lvd.utils.load_checkpoint(checkpoint_path)
+    def make_model(self):
+        model_conf = self.conf["transformer_ardm"]["model"]
+        
+        self.state["prng_key"], enc_key, dec_key = jax.random.split(self.state["prng_key"],3)
+
+        self.state["model"] = DAEModel(
+            encoder=daed.Encoder(
+                self.dist_manager, 
+                key=enc_key, 
+                k =enc_conf["k"],
+                n_layers=enc_conf["n_layers"]
+            ),
+            decoder=daed.Decoder(
+                self.dist_manager, 
+                key=dec_key, 
+                k =dec_conf["k"],
+                n_layers=dec_conf["n_layers"]
+            )
+        )
     
-    with open(metrics_path,"w") as f:
-        #TODO: Fix LatentDataset RNG
-        with lvd.latent_dataset.LatentDataset(data_directory=args.data_dir, 
-            batch_size=batch_size, prompt_length=l_x, completion_length=l_y) as ld:
-            for _ in lvd.utils.tqdm_inf():
-                data = sample_datapoint(next(ld),state[2])
-                loss, state = lvd.utils.update_state(state, data, optimizer, loss_fn)
-                f.write(f"{loss}\n")
-                f.flush()
-                iteration = state[3]
-                if (iteration % ckpt_interval) == (ckpt_interval - 1):
-                    ckpt_path = lvd.utils.ckpt_path(ckpt_dir, iteration+1, "dt")
-                    lvd.utils.save_checkpoint(state, ckpt_path)
+    def make_optimizer(self):
+        opt_cfg = self.cfg["diffusion_auto_encoder"]["train"]
+        
+        self.optimizer = optax.adam(lr=opt_cfg["lr"])
+        self.state["opt_state"] = self.optimizer.init(self.model)
+    
+    def _list_checkpoints(self):
+        """List all checkpoint directories."""
+        try:
+            directories = [d for d in self.ckpt_fs.listdir('/') if self.ckpt_fs.isdir(d)]
+            checkpoint_dirs = [d for d in directories if d.startswith('ckpt_')]
+            return sorted(checkpoint_dirs, key=lambda x: int(x.split('_')[1]))
+        except fs.errors.ResourceNotFound:
+            return []
+
+    def save_checkpoint(self, step):
+        """Save a checkpoint at the given step."""
+        path = self.new_ckpt_path(step)
+        
+        # Ensure the checkpoint directory exists
+        self.ckpt_fs.makedirs(path, recreate=True)
+
+        # Save model
+        model_path = f"{path}/model"
+        self.ckpt_fs.makedirs(f"{model_path}/encoder", recreate=True)
+        self.ckpt_fs.makedirs(f"{model_path}/decoder", recreate=True)
+        self.state["model"].encoder.save(f"{model_path}/encoder")
+        self.state["model"].decoder.save(f"{model_path}/decoder")
+
+        # Save optimizer state
+        opt_path = f"{path}/opt_state"
+        self.ckpt_fs.makedirs(opt_path, recreate=True)
+
+        def save_opt_state(opt_state, prefix):
+            for key, value in opt_state.items():
+                if isinstance(value, (jnp.ndarray, jax.Array)):
+                    self.dist_manager.save_array(value, self.dist_manager.uniform_sharding, f"{prefix}/{key}")
+                elif isinstance(value, (dict, optax.EmptyState)):
+                    save_opt_state(value, f"{prefix}/{key}")
+                else:
+                    # For scalar values or other types, save using regular pickle
+                    with self.ckpt_fs.open(f"{prefix}/{key}.pkl", 'wb') as f:
+                        pkl.dump(value, f)
+
+        save_opt_state(self.state["opt_state"], opt_path)
+
+        # Save PRNG key
+        self.dist_manager.save_array(self.state["prng_key"], self.dist_manager.uniform_sharding, f"{path}/prng_key")
+
+    def load_checkpoint(self, path=None):
+        """Load a checkpoint from the given path or the latest if not specified."""
+        if path is None:
+            path = self.latest_ckpt_path()
+        
+        if path is None:
+            raise ValueError("No checkpoint found to load.")
+
+        # Load model
+        model_path = f"{path}/model"
+        self.state["model"].encoder.load(f"{model_path}/encoder")
+        self.state["model"].decoder.load(f"{model_path}/decoder")
+
+        # Load optimizer state
+        opt_path = f"{path}/opt_state"
+
+        def load_opt_state(prefix):
+            opt_state = {}
+            for item in self.ckpt_fs.listdir(prefix):
+                item_path = f"{prefix}/{item}"
+                if self.ckpt_fs.isdir(item_path):
+                    opt_state[item] = load_opt_state(item_path)
+                elif item.endswith('.pkl'):
+                    with self.ckpt_fs.open(item_path, 'rb') as f:
+                        opt_state[item[:-4]] = pkl.load(f)
+                else:
+                    opt_state[item] = self.dist_manager.load_array(self.dist_manager.uniform_sharding, item_path)
+            return opt_state
+
+        self.state["opt_state"] = load_opt_state(opt_path)
+
+        # Reconstruct the OptState object
+        self.state["opt_state"] = jtu.tree_map(
+            lambda x: x if isinstance(x, (optax.EmptyState, dict)) else x,
+            self.state["opt_state"]
+        )
+
+        # Load PRNG key
+        self.state["prng_key"] = self.dist_manager.load_array(self.dist_manager.uniform_sharding, f"{path}/prng_key")
+
+    
+    def most_recent_ckpt(self):
+        """Get the most recent checkpoint number."""
+        checkpoints = self._list_checkpoints()
+        if not checkpoints:
+            return 0
+        return int(checkpoints[-1].split('_')[1])
+
+
+    def new_ckpt_path(self, id):
+        ckpt_n = self.most_recent_ckpt()
+
+        ckpt_freq = self.cfg["diffusion_autoencoder"]["train"]["ckpt_freq"]
+        
+        new_ckpt_n = ckpt_n + ckpt_freq
+        assert id == new_ckpt_n
+
+        os.path.join(self.args.ckpt_path,"ckpt_path")
+
+    def latest_ckpt_path(self):
+        """Get the path of the latest checkpoint."""
+        checkpoints = self._list_checkpoints()
+        if not checkpoints:
+            return None
+        return f'/{checkpoints[-1]}'
+    
+
+    def train(self):
+        args = self.args
+        cfg = self.cfg
+
+        train_cfg = cfg["diffusion_auto_encoder"]["train"]
+        ckpt_freq = train_cfg["ckpt_freq"]
+        total_steps = train_cfg["total_steps"]
+        log_freq = train_cfg["log_freq"]
+
+        if args.ckpt:
+            self.load_checkpoint(args.ckpt)
+        else:
+            self.load_checkpoint()  # Attempt to load the latest checkpoint
+
+        step = self.most_recent_ckpt()
+
+        # Initialize the data downloader
+        self.sharded_data_downloader.start(step * self.sharded_data_downloader.batch_size)
+
+        try:
+            total_loss = 0
+            log_start_step = step
+            while step < total_steps:
+                step += 1
+                
+                # Get data from the downloader
+                data = self.sharded_data_downloader.step()
+
+                # Update the model
+                loss, self.state = dc.update(self.state, data, self.optimizer, self.loss_fn)
+
+                # Accumulate loss
+                total_loss += loss
+
+                # Acknowledge that we've processed the data
+                self.sharded_data_downloader.ack()
+
+                if step % log_freq == 0:
+                    avg_loss = total_loss / (step - log_start_step)
+                    print(f"Step {step}, Average Loss: {avg_loss:.4f}")
+                    # Reset for next logging interval
+                    total_loss = 0
+                    log_start_step = step
+
+                if step % ckpt_freq == 0:
+                    self.save_checkpoint(step)
+
+        except KeyboardInterrupt:
+            print("Training interrupted. Saving checkpoint...")
+            self.save_checkpoint(step)
+        finally:
+            # Always stop the data downloader when we're done
+            self.sharded_data_downloader.stop()
+
+        print("Training completed.")
+
+    def autoencode(self):
+        args = self.args
+        cfg = self.cfg
+
+        latest_ckpt_path = self.latest_ckpt_path()
+        self.load_checkpoint(latest_ckpt_path)
+
+    
+
+
+

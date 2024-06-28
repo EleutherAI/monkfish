@@ -59,22 +59,26 @@ def main():
 def train_diffusion_autoencoder(config, args):
     print(f"Training diffusion autoencoder with config {config} in {args.mode} mode")
 
-    def actor_factory():
+    def dae_factory():
         return dae.DiffAEHarness(
-            # Add necessary parameters from config
+            args,
+            config
         )
 
-    backend = config.get("backend", "cpu")
+    backend = config["backend"]
     if args.mode == "local":
         if backend == "tpu":
-            # TODO: Implement local TPU training
-            pass
+            dae = dae_factory()
+            dae.train()
         elif backend == "gpu":
             # TODO: Implement local GPU training
-            pass
-        else:
+            raise NotImplementedError()
+        elif backend == "cpu":
             # TODO: Implement local CPU training
-            pass
+            raise NotImplementedError()
+        else:
+            print("Invalid backend")
+
     elif args.mode == "distributed":
         if backend == "tpu":
             # TODO: Implement distributed TPU training
