@@ -22,7 +22,7 @@ import cv2
 import tempfile
 
 
-def gcp_filesystem(bucket_name, root_path="", credentials_path=None):
+def gcp_filesystem(bucket_name, root_path, credentials_path):
     if not credentials_path:
         raise ValueError("Credentials path must be provided for authentication.")
 
@@ -36,12 +36,60 @@ def gcp_filesystem(bucket_name, root_path="", credentials_path=None):
     google_cloud_storage_fs = fs_gcsfs.GCSFS(bucket_name=bucket_name, root_path=root_path, client=client)
     return google_cloud_storage_fs
 
-def os_filesystem(root_path="/"):
+def os_filesystem(root_path):
     local_fs = fs.osfs.OSFS(root_path)
     return local_fs
 
+def fs_initializer(args):
+    fs_type = args.get('fs_type')
+
+    if fs_type == 'gcp':
+        bucket_name = args.get('bucket_name')
+        root_path = args.get('root_path', '')
+        credentials_path = args.get('credentials_path')
+
+        if not bucket_name:
+            raise ValueError("Bucket name must be provided for GCP filesystem.")
+        if not credentials_path:
+            raise ValueError("Credentials path must be provided for GCP filesystem.")
+
+        return gcp_filesystem(bucket_name, root_path, credentials_path)
+
+    elif fs_type == 'os':
+        root_path = args.get('root_path')
+
+        if not root_path:
+            raise ValueError("Root path must be provided for OS filesystem.")
+
+        return os_filesystem(root_path)
+
+    else:
+        raise ValueError(f"Unsupported filesystem type: {fs_type}")
+
+def sdu_worker(start_index, queue, stop_event, workers_per_node, nodes, 
+               worker_interface_cls, fs_init_args):
+    counter = start_index
+
+    fs = fs_initializer(fs_init_args)
+    worker_interface = worker_interface_cls(fs)
+    
+    while not stop_event.is_set():
+        try:
+            # Add a timeout to allow checking stop_event
+            example, _ = queue.get(timeout=0.2)
+            worker_interface.upload_example(counter, example)
+            counter += workers_per_node * nodes
+        except multiprocessing.queues.Empty:
+            continue
+    
+    # Drain remaining queue once stop signal is sent
+    while not queue.empty():
+        example, _ = queue.get()
+        worker_interface.upload_example(counter, example)
+        counter += workers_per_node * nodes
+
 class ShardedDataUploader:
-    def __init__(self, worker_interface_factory, shard_interface_factory, dist_manager, 
+    def __init__(self, worker_fs_args, worker_interface_factory, shard_interface_factory, dist_manager, 
                  workers_per_node=1, batch_size=32, queue_depth=5):
         assert batch_size % dist_manager.nodes == 0
 
@@ -54,6 +102,7 @@ class ShardedDataUploader:
         self.nodes = dist_manager.nodes
         self.worker_interface_factory = worker_interface_factory
         self.shard_interface_factory = shard_interface_factory
+        self.worker_fs_args = worker_fs_args  # New attribute
 
         self.shard_interface = self.shard_interface_factory()
 
@@ -76,9 +125,9 @@ class ShardedDataUploader:
 
             queue = multiprocessing.Queue(maxsize=self.queue_depth)
             worker = multiprocessing.Process(
-                target=self._worker, args=(
-                    start_index, queue, self.stop_event
-                )
+                target=sdu_worker, args=(
+                    start_index, queue, self.stop_event, 
+                    self.workers_per_node, self.nodes, self.worker_interface_factory, self.worker_fs_args)
             )
 
             self.queues.append(queue)
@@ -99,30 +148,6 @@ class ShardedDataUploader:
         
         self.queues = None
         self.stop_event = None
-
-    def _worker(self, start_index, queue, stop_event):
-        """
-        def write_to_file(filename, content):
-            with open(filename, 'a') as file:
-                file.write(content)
-        """
-        counter = start_index
-        worker_interface = self.worker_interface_factory()
-        
-        while not stop_event.is_set():
-            try:
-                # Add a timeout to allow checking stop_event
-                example, _ = queue.get(timeout=0.2)
-                worker_interface.upload_example(counter, example)
-                counter += self.workers_per_node * self.nodes
-            except multiprocessing.queues.Empty:
-                continue
-        
-        #Drain remaining queue once stop signal is sent
-        while not queue.empty():
-            example, _ = queue.get()
-            worker_interface.upload_example(counter, example)
-            counter += self.workers_per_node * self.nodes
 
     def step(self, accelerator_data):
         assert self.processed
@@ -147,8 +172,20 @@ class ShardedDataUploader:
         self.round_robin_index %= self.workers_per_node
         self.processed = True
 
+def sdd_worker(start_index, queue, stop_event, workers_per_node, nodes, 
+               worker_interface_cls, fs_init_args):
+    counter = start_index
+
+    fs = fs_initializer(fs_init_args)
+    worker_interface = worker_interface_cls(fs)
+    
+    while(not stop_event.is_set()):
+        example = worker_interface.get_example(counter)
+        queue.put((example, counter))
+        counter += workers_per_node*nodes
+
 class ShardedDataDownloader:
-    def __init__(self, worker_interface_factory, shard_interface_factory, dist_manager, 
+    def __init__(self, worker_fs_args, worker_interface_cls, shard_interface_factory, dist_manager, 
                  workers_per_node=1, batch_size=32, queue_depth=5):
         assert batch_size % dist_manager.nodes == 0
 
@@ -159,7 +196,8 @@ class ShardedDataDownloader:
         self.dist_manager = dist_manager
         self.pid = dist_manager.pid
         self.nodes = dist_manager.nodes
-        self.worker_interface_factory = worker_interface_factory
+        self.worker_interface_cls = worker_interface_cls
+        self.worker_fs_args = worker_fs_args
         self.shard_interface_factory = shard_interface_factory
 
         self.shard_interface = self.shard_interface_factory()
@@ -183,9 +221,9 @@ class ShardedDataDownloader:
 
             queue = multiprocessing.Queue(maxsize=self.queue_depth)
             worker = multiprocessing.Process(
-                target=self._worker, args=(
-                    start_index, queue, self.stop_event
-                )
+                target=sdd_worker, args=(
+                    start_index, queue, self.stop_event, 
+                    self.workers_per_node, self.nodes, self.worker_interface_cls, self.worker_fs_args)
             )
 
             self.queues.append(queue)
@@ -296,7 +334,7 @@ class ImageShardInterface:
         pass
 
     def host_to_accelerator(self, local_data, batch_size):
-        pass
+        return "weeb"
     
     def accelerator_to_host(self, global_data):
         pass

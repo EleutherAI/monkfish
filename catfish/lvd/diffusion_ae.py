@@ -28,13 +28,22 @@ class DiffAEHarness:
         self.dist_manager = None
         self.data_loader = None
         self.credentials_path = None
-        self.data_fs = None
+        self.worker_fs_args = None
         self.ckpt_fs = None
 
+        print("Parsing arguments...")
         self.parse_args()
+        
+        print("Initializing file system...")
         self.init_fs()
+
+        print("Initializing sharding manager...")
         self.init_dist_manager()
+        
+        print("Initializing data_loader...")
         self.init_data_loader()
+        
+        print("Creating model...")
         self.make_model()
 
     def parse_args(self):
@@ -51,12 +60,17 @@ class DiffAEHarness:
         dl_root_directory = dl_conf["data_root_directory"]
 
         if dl_fs_type == "local":
-            self.data_fs = sdl.os_filesystem(dl_root_directory)
+            self.worker_fs_args = {
+                "fs_type": "os",
+                "root_path": dl_root_directory
+            }
         elif dl_fs_type == "gcp":
-            self.data_fs = sdl.gcp_filesystem(
-                gcp_bucket_name, 
-                root_path=dl_root_directory, 
-                gcp_credentials_path=gcp_credentials_path)
+            self.worker_fs_args = {
+                "fs_type": "gcp",
+                "bucket_name": gcp_bucket_name,
+                "root_path": dl_root_directory,
+                "credentials_path": gcp_credentials_path
+            }
         else:
             raise Exception(f"Invalid fs_type provided, provided {dl_fs_type}")
         
@@ -80,18 +94,14 @@ class DiffAEHarness:
         print(operation)
 
         if operation == "train_dae":
-            def worker_interface_factory():
-                iwi = sdl.ImageWorkerInterface(self.data_fs)
-                return iwi
+            worker_interface_cls = sdl.ImageWorkerInterface
             
             def shard_interface_factory():
                 isi = sdl.ImageShardInterface(self.dist_manager)
                 return isi
         
         elif operation == "autoencode":
-            def worker_interface_factory():
-                iwi = sdl.VideoWorkerInterface(self.data_fs)
-                return iwi
+            worker_interface_cls = sdl.VideoWorkerInterface
             
             def shard_interface_factory():
                 isi = sdl.VideoShardInterface(self.dist_manager)
@@ -101,7 +111,8 @@ class DiffAEHarness:
 
         
         self.sharded_data_downloader =  sdl.ShardedDataDownloader(
-            worker_interface_factory,
+            self.worker_fs_args,
+            worker_interface_cls,
             shard_interface_factory,
             self.dist_manager,
         )
@@ -118,7 +129,8 @@ class DiffAEHarness:
         enc_conf = model_conf["encoder"]
         dec_conf = model_conf["decoder"]
 
-        key = self.cfg["seed"]
+        seed = self.cfg["seed"]
+        self.state["prng_key"] = self.dist_manager.get_key(seed)
         
         self.state["prng_key"], enc_key, dec_key = jax.random.split(self.state["prng_key"],3)
 
@@ -238,7 +250,7 @@ class DiffAEHarness:
     def new_ckpt_path(self, id):
         ckpt_n = self.most_recent_ckpt()
 
-        ckpt_freq = self.cfg["diffusion_autoencoder"]["train"]["ckpt_freq"]
+        ckpt_freq = self.cfg["diffusion_auto_encoder"]["train"]["ckpt_freq"]
         
         new_ckpt_n = ckpt_n + ckpt_freq
         assert id == new_ckpt_n
@@ -262,12 +274,15 @@ class DiffAEHarness:
         total_steps = train_cfg["total_steps"]
         log_freq = train_cfg["log_freq"]
 
+        """
         if args.ckpt:
             self.load_checkpoint(args.ckpt)
         else:
             self.load_checkpoint()  # Attempt to load the latest checkpoint
+        """
 
-        step = self.most_recent_ckpt()
+        #step = self.most_recent_ckpt()
+        step = 0
 
         # Initialize the data downloader
         self.sharded_data_downloader.start(step * self.sharded_data_downloader.batch_size)
@@ -280,9 +295,12 @@ class DiffAEHarness:
                 
                 # Get data from the downloader
                 data = self.sharded_data_downloader.step()
+                print(data)
+                self.sharded_data_downloader.ack()
+                """
 
                 # Update the model
-                loss, self.state = dc.update(self.state, data, self.optimizer, self.loss_fn)
+                loss, self.state = dc.update_state(self.state, data, self.optimizer, self.loss_fn)
 
                 # Accumulate loss
                 total_loss += loss
@@ -299,10 +317,11 @@ class DiffAEHarness:
 
                 if step % ckpt_freq == 0:
                     self.save_checkpoint(step)
+                """
 
         except KeyboardInterrupt:
             print("Training interrupted. Saving checkpoint...")
-            self.save_checkpoint(step)
+            #self.save_checkpoint(step)
         finally:
             # Always stop the data downloader when we're done
             self.sharded_data_downloader.stop()

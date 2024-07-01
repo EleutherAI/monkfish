@@ -1,8 +1,13 @@
 import argparse
 import json
+import multiprocessing
+
 
 import catfish.lvd.diffusion_ae as dae
 #import catfish.lvd.diffusion_ar as dar
+
+def configure_globals():
+    multiprocessing.set_start_method('spawn')
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Sharded/distributed training tool for video generative model")
@@ -41,6 +46,7 @@ def read_config(config_path):
         return json.load(f)
 
 def main():
+    configure_globals()
     args = parse_args()
     config = read_config(args.config)
 

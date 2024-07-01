@@ -31,14 +31,14 @@ class DistManager:
 
         self.fs = filesystem
     
-    def get_key(self, key):
+    def get_key(self, seed):
         uniform_sharding = shrd.NamedSharding(self.mesh, shrd.PartitionSpec())
         """
         with jax.default_device(self.cpu_device):
             host_key = jax.random.PRNGKey(key)
         prng_key = self.scatter(uniform_sharding)(host_key)
         """
-        f = lambda: jax.random.PRNGKey(key)
+        f = lambda: jax.random.PRNGKey(seed)
         prng_f = jax.jit(f, out_shardings=uniform_sharding)
         prng_key = prng_f()
         return prng_key

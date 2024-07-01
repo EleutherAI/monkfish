@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import MagicMock, patch
-#from multiprocessing import Event, Queue
 import catfish.lvd.shrd_data_loader as sdl
 
 @pytest.fixture
@@ -20,12 +19,13 @@ def dist_manager_factory():
     return _manager
 
 @pytest.fixture
-def mock_worker_interface_factory():
-    def factory():
-        interface = MagicMock()
-        interface.get_example = lambda x: (f"data_{x}", x)  # Return both data and ID
-        return interface
-    return factory
+def mock_worker_interface_cls():
+    class MockWorkerInterface:
+        def __init__(self, fs):
+            self.fs = fs
+        def get_example(self, x):
+            return f"data_{x}", x
+    return MockWorkerInterface
 
 @pytest.fixture
 def mock_shard_interface_factory():
@@ -36,10 +36,18 @@ def mock_shard_interface_factory():
     return factory
 
 @pytest.fixture
-def sharded_downloader(dist_manager_factory, mock_worker_interface_factory, mock_shard_interface_factory):
+def mock_fs_init_args():
+    return {
+        'fs_type': 'os',
+        'root_path': '/tmp/test_data'
+    }
+
+@pytest.fixture
+def sharded_downloader(dist_manager_factory, mock_worker_interface_cls, mock_shard_interface_factory, mock_fs_init_args):
     dist_manager = dist_manager_factory(1)
     downloader = sdl.ShardedDataDownloader(
-        worker_interface_factory=mock_worker_interface_factory,
+        worker_fs_args=mock_fs_init_args,
+        worker_interface_cls=mock_worker_interface_cls,
         shard_interface_factory=mock_shard_interface_factory,
         dist_manager=dist_manager,
         workers_per_node=2,
@@ -49,12 +57,13 @@ def sharded_downloader(dist_manager_factory, mock_worker_interface_factory, mock
     return downloader
 
 @pytest.fixture
-def sharded_downloaders(dist_manager_factory, mock_worker_interface_factory, mock_shard_interface_factory):
+def sharded_downloaders(dist_manager_factory, mock_worker_interface_cls, mock_shard_interface_factory, mock_fs_init_args):
     downloaders = []
     for i in range(4):
         dist_manager = dist_manager_factory(i)
         downloader = sdl.ShardedDataDownloader(
-            worker_interface_factory=mock_worker_interface_factory,
+            worker_fs_args=mock_fs_init_args,
+            worker_interface_cls=mock_worker_interface_cls,
             shard_interface_factory=mock_shard_interface_factory,
             dist_manager=dist_manager,
             workers_per_node=2,
@@ -63,19 +72,6 @@ def sharded_downloaders(dist_manager_factory, mock_worker_interface_factory, moc
         )
         downloaders.append(downloader)
     return downloaders
-
-"""
-def test_local_batch_contiguity(sharded_downloader):
-    sharded_downloader.start(0)
-    # Assuming step method is updated to store processed batch data
-    processed_data = sharded_downloader.step()
-
-    # Check data contiguity by batch
-    expected_data = ["processed_data_" + str(i) for i in range(sharded_downloader.batch_size)]
-    assert processed_data == expected_data, "Batch data is not contiguous or incorrect"
-
-    sharded_downloader.stop()
-"""
 
 def test_round_robin_scheduling(sharded_downloader):
     sharded_downloader.start(0)
@@ -100,19 +96,23 @@ def test_worker_shutdown(sharded_downloader):
     for worker in sharded_downloader.workers:
         assert not worker.is_alive(), "Worker did not shut down correctly"
     
-def test_batch_elements_distribution(sharded_downloaders):
+@patch('catfish.lvd.shrd_data_loader.fs_initializer')
+def test_batch_elements_distribution(mock_fs_initializer, sharded_downloaders):
+    mock_fs = MagicMock()
+    mock_fs_initializer.return_value = mock_fs
+
     for downloader in sharded_downloaders:
         downloader.start(0)
 
     all_batches = []
     for downloader in sharded_downloaders:
         batch = downloader.step()
-        all_batches.append([item[1] for item in batch])  # Extract only the IDs
+        all_batches.append(batch)
 
     for i, downloader in enumerate(sharded_downloaders):
         batch_size = downloader.batch_size
         expected_elements = set(range(downloader.dist_manager.pid, batch_size, downloader.dist_manager.nodes))
-        processed_elements = set(all_batches[i])
+        processed_elements = set([item[1] for item in all_batches[i]])
         print(f"Downloader {i}:")
         print(f"Expected: {sorted(list(expected_elements))}")
         print(f"Processed: {sorted(list(processed_elements))}")
@@ -121,5 +121,3 @@ def test_batch_elements_distribution(sharded_downloaders):
 
     for downloader in sharded_downloaders:
         downloader.stop()
-
-# Additional tests can be written to simulate failure scenarios, e.g., worker fails to fetch data
