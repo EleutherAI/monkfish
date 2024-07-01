@@ -21,6 +21,10 @@ import mutagen.mp4
 import cv2
 import tempfile
 
+import jax
+import jax.numpy as jnp
+import jax.sharding as shrd
+
 
 def gcp_filesystem(bucket_name, root_path, credentials_path):
     if not credentials_path:
@@ -331,10 +335,21 @@ class ImageWorkerInterface:
 class ImageShardInterface:
     """Interface to image data, folder is a dataset, 1 train example per file"""
     def __init__(self, dist_manager):
+        self.dist_manager = dist_manager
         pass
 
     def host_to_accelerator(self, local_data, batch_size):
-        return "weeb"
+        #TODO: Remove dummy data and generalize properly to multinode
+        shape = (batch_size, 3, 512, 256)
+        np_array = np.zeros(shape, dtype=np.float32)
+        mesh = self.dist_manager.mesh
+        p_spec = shrd.PartitionSpec("dp")
+        sharding = shrd.NamedSharding(mesh, p_spec)
+        jax_array = jnp.array(np_array)
+        scatter_fn = self.dist_manager.scatter(sharding, jnp.float32)
+        sharded_array = scatter_fn(jax_array)
+        jax.debug.inspect_array_sharding(sharded_array, callback=print)
+        return sharded_array
     
     def accelerator_to_host(self, global_data):
         pass

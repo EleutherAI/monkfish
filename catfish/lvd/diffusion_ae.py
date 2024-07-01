@@ -266,6 +266,13 @@ class DiffAEHarness:
     
 
     def train(self):
+        def loss_fn(model, data, subkey):
+            latents = jax.vmap(model.encoder)(data)
+            diff_data = (latents, data)
+            loss = dc.diffusion_loss(
+                model.decoder, diff_data, dc.f_neg_gamma, subkey)
+            return loss
+        
         args = self.args
         cfg = self.cfg
 
@@ -295,18 +302,17 @@ class DiffAEHarness:
                 
                 # Get data from the downloader
                 data = self.sharded_data_downloader.step()
-                print(data)
+                print(data.shape)
                 self.sharded_data_downloader.ack()
-                """
 
                 # Update the model
-                loss, self.state = dc.update_state(self.state, data, self.optimizer, self.loss_fn)
+                loss, self.state = dc.update_state(self.state, data, self.optimizer, loss_fn)
+                print(loss)
 
+                """
                 # Accumulate loss
                 total_loss += loss
 
-                # Acknowledge that we've processed the data
-                self.sharded_data_downloader.ack()
 
                 if step % log_freq == 0:
                     avg_loss = total_loss / (step - log_start_step)
@@ -314,10 +320,15 @@ class DiffAEHarness:
                     # Reset for next logging interval
                     total_loss = 0
                     log_start_step = step
+                """
 
+                """
                 if step % ckpt_freq == 0:
                     self.save_checkpoint(step)
                 """
+                
+                # Acknowledge that we've processed the data
+                self.sharded_data_downloader.ack()
 
         except KeyboardInterrupt:
             print("Training interrupted. Saving checkpoint...")
