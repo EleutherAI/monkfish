@@ -19,7 +19,7 @@
         "data_loader": {
             "fs_type": "local",
             "data_root_directory": "../dummy_image_data",
-            "workers_per_node": 4,
+            "workers_per_node": 1,
             "batch_size": 32,
             "queue_depth": 10
         },

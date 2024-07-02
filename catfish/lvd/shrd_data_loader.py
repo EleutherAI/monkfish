@@ -176,17 +176,27 @@ class ShardedDataUploader:
         self.round_robin_index %= self.workers_per_node
         self.processed = True
 
+
 def sdd_worker(start_index, queue, stop_event, workers_per_node, nodes, 
                worker_interface_cls, fs_init_args):
+    print(f"sdd worker started with  start_index: {start_index}")
     counter = start_index
 
     fs = fs_initializer(fs_init_args)
     worker_interface = worker_interface_cls(fs)
     
-    while(not stop_event.is_set()):
+    while not stop_event.is_set():
         example = worker_interface.get_example(counter)
-        queue.put((example, counter))
-        counter += workers_per_node*nodes
+        try:
+            # Try to put the item in the queue with a timeout
+            queue.put((example, counter), timeout=0.1)
+            counter += workers_per_node * nodes
+        except multiprocessing.queues.Full:
+            # If the queue is full, just continue to the next iteration
+            continue
+    queue.close()
+    print("worker finished")
+
 
 class ShardedDataDownloader:
     def __init__(self, worker_fs_args, worker_interface_cls, shard_interface_factory, dist_manager, 
@@ -239,31 +249,23 @@ class ShardedDataDownloader:
     def stop(self):
         self.stop_event.set() 
 
-        # Empty queues to unblock workers trying to put items
-        #Note,there is still a chance this fails under
-        #specific circumstances because of a race condition, 
-        #TODO: fix this
         while any(not queue.empty() for queue in self.queues):
             for queue in self.queues:
                 try:
                     queue.get_nowait()
                 except multiprocessing.queues.Empty:
                     continue
+            # Wait a bit to make sure nothing else is added to the queues
+            # SDD will deadlock otherwise
+            #TODO: Make this less hacky
+            time.sleep(0.3)
+        
         
         for worker in self.workers:
             worker.join()
         
         self.queues = None
         self.stop_event = None
-
-    def _worker(self, start_index, queue, stop_event):
-        counter = start_index
-        worker_interface = self.worker_interface_factory()
-        
-        while(not stop_event.is_set()):
-            example = worker_interface.get_example(counter)
-            queue.put((example, counter))
-            counter += self.workers_per_node*self.nodes
 
     def step(self):
         assert self.processed
@@ -341,7 +343,10 @@ class ImageShardInterface:
     def host_to_accelerator(self, local_data, batch_size):
         #TODO: Remove dummy data and generalize properly to multinode
         shape = (batch_size, 3, 512, 256)
-        np_array = np.zeros(shape, dtype=np.float32)
+        arrays = [x[0] for x in local_data]
+        print("Shape:",shape, np.stack(arrays).shape)
+        #print("Shapes:", shape, local_data.shape)
+        np_array = np.transpose(np.stack(arrays).astype(np.float32),(0, 3, 2, 1))
         mesh = self.dist_manager.mesh
         p_spec = shrd.PartitionSpec("dp")
         sharding = shrd.NamedSharding(mesh, p_spec)

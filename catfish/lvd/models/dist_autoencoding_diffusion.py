@@ -64,7 +64,6 @@ class Encoder(eqx.Module):
     def __call__(self, x):
         h = reshape_to_patches(x)
         for i in range(0,len(self.layers)):
-            print(self.layers[i])
             h = self.layers[i](h)
         
         y = h
@@ -88,7 +87,7 @@ class Encoder(eqx.Module):
 
 
 class Decoder(eqx.Module):
-    #[3 x 512 x 256] x [32 x 32 x 32] -> [3 x 512 x 256]
+    #[32 x 32 x 32] x [3 x 512 x 256] x [] -> [3 x 512 x 256]
     layers: list
     decode_embed:  dl.ShrdConv
     
@@ -108,9 +107,11 @@ class Decoder(eqx.Module):
         self.layers = layers
         self.decode_embed = dl.ShrdConv(dist_manager, keys[-1], 1, 1, 32,128*k)
 
-    def __call__(self, x, embed):
+    def __call__(self, embed, x, neg_gamma):
         x_patches = reshape_to_patches(x)
         h = self.layers[0](x_patches) + self.decode_embed(embed)
+        #TODO: make neg_gamma_conditionining less hacky
+        h.at[0].set(h[0] + neg_gamma)
         for i in range(1,len(self.layers)):
             h = self.layers[i](h)
         

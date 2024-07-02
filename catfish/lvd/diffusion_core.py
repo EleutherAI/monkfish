@@ -86,3 +86,18 @@ def update_state(state, data, optimizer, loss_fn):
     new_state = new_model, new_opt_state, new_key
     
     return loss,new_state
+
+@functools.partial(jax.jit, static_argnums=(2, 3))
+def update_state_dict(state_dict, data, optimizer, loss_fn):
+    state = (
+        state_dict["model"],
+        state_dict["opt_state"],
+        state_dict["prng_key"]
+    )
+    loss, new_state = update_state(state, data, optimizer, loss_fn)
+    new_state_dict = {
+        "model": new_state[0],
+        "opt_state": new_state[1],
+        "prng_key": new_state[2]
+    }
+    return loss, new_state_dict

@@ -1,9 +1,11 @@
 import os
+import time
 import re
 import collections
 
 import fs
 import jax
+import jax.tree_util as jtu
 import jax.numpy as jnp
 import optax
 import pickle as pkl
@@ -45,6 +47,9 @@ class DiffAEHarness:
         
         print("Creating model...")
         self.make_model()
+
+        print("Creating Optimizer...")
+        self.make_optimizer()
 
     def parse_args(self):
         pass
@@ -91,7 +96,7 @@ class DiffAEHarness:
 
     def init_data_loader(self):
         operation = self.args.operation
-        print(operation)
+        dl_conf = self.cfg["diffusion_auto_encoder"]["data_loader"]
 
         if operation == "train_dae":
             worker_interface_cls = sdl.ImageWorkerInterface
@@ -115,6 +120,9 @@ class DiffAEHarness:
             worker_interface_cls,
             shard_interface_factory,
             self.dist_manager,
+            workers_per_node=dl_conf["workers_per_node"],
+            batch_size=dl_conf["batch_size"],
+            queue_depth=dl_conf["queue_depth"],
         )
 
     def init_dist_manager(self):
@@ -152,8 +160,8 @@ class DiffAEHarness:
     def make_optimizer(self):
         opt_cfg = self.cfg["diffusion_auto_encoder"]["train"]
         
-        self.optimizer = optax.adam(lr=opt_cfg["lr"])
-        self.state["opt_state"] = self.optimizer.init(self.model)
+        self.optimizer = optax.adam(learning_rate=opt_cfg["lr"])
+        self.state["opt_state"] = self.optimizer.init(self.state["model"])
     
     def _list_checkpoints(self):
         """List all checkpoint directories."""
@@ -299,14 +307,19 @@ class DiffAEHarness:
             log_start_step = step
             while step < total_steps:
                 step += 1
+
+                if step > 15:
+                    break
+
+                time.sleep(1)
                 
                 # Get data from the downloader
                 data = self.sharded_data_downloader.step()
-                print(data.shape)
-                self.sharded_data_downloader.ack()
+                print("a")
 
                 # Update the model
-                loss, self.state = dc.update_state(self.state, data, self.optimizer, loss_fn)
+                loss, self.state = dc.update_state_dict(self.state, data, self.optimizer, loss_fn)
+                print("b")
                 print(loss)
 
                 """
@@ -329,13 +342,15 @@ class DiffAEHarness:
                 
                 # Acknowledge that we've processed the data
                 self.sharded_data_downloader.ack()
+                print("c")
 
         except KeyboardInterrupt:
-            print("Training interrupted. Saving checkpoint...")
-            #self.save_checkpoint(step)
+            print("Training interrupted.")
         finally:
             # Always stop the data downloader when we're done
+            print("d")
             self.sharded_data_downloader.stop()
+            print("e")
 
         print("Training completed.")
 

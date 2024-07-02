@@ -1,3 +1,4 @@
+import os
 import pytest
 from unittest.mock import MagicMock, patch
 import catfish.lvd.shrd_data_loader as sdl
@@ -37,9 +38,15 @@ def mock_shard_interface_factory():
 
 @pytest.fixture
 def mock_fs_init_args():
+    root_path = '/tmp/test_data'
+    
+    # Create the directory if it doesn't exist
+    if not os.path.exists(root_path):
+        os.makedirs(root_path)
+    
     return {
         'fs_type': 'os',
-        'root_path': '/tmp/test_data'
+        'root_path': root_path
     }
 
 @pytest.fixture

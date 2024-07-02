@@ -234,6 +234,7 @@ class ShrdConv(eqx.Module):
             x[jnp.newaxis,:,:], self.kernel, 
             window_strides=(1,1), padding=self.padding, 
             lhs_dilation=None, rhs_dilation=None)[0,:,:,:]
+        y = y*self.scale
         if self.bias is not None:
             y = y + self.bias
         return y
