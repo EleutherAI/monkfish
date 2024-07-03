@@ -89,3 +89,62 @@ def test_save_load_pytree(dist_manager, tmp_path):
     assert "a" in loaded_pytree and "b" in loaded_pytree
     assert jnp.allclose(pytree["a"], loaded_pytree["a"])
     assert jnp.allclose(pytree["b"], loaded_pytree["b"])
+
+
+def test_get_pytree_sharding(dist_manager):
+    # Create a simple pytree with mixed types
+    pytree = {
+        'a': jnp.array([1., 2., 3.]),
+        'b': jnp.zeros((8,2),dtype=jnp.float32),
+        'c': 'not an array',
+        'd': {
+            'e': jnp.array([5., 6.])
+        }
+    }
+
+    # Apply different shardings to the arrays
+    pytree['a'] = jax.device_put(pytree['a'], dist_manager.uniform_sharding)
+    pytree['b'] = jax.device_put(pytree['b'], dist_manager.sharding(shrd.PartitionSpec('dp', None)))
+    pytree['d']['e'] = jax.device_put(pytree['d']['e'], dist_manager.sharding(shrd.PartitionSpec('mp')))
+
+    sharding_pytree = dist_manager.get_pytree_sharding(pytree)
+
+    assert isinstance(sharding_pytree['a'], shrd.NamedSharding)
+    assert sharding_pytree['a'].spec == shrd.PartitionSpec()
+    
+    assert isinstance(sharding_pytree['b'], shrd.NamedSharding)
+    assert sharding_pytree['b'].spec == shrd.PartitionSpec('dp', None)
+    
+    assert sharding_pytree['c'] is None
+    
+    assert isinstance(sharding_pytree['d']['e'], shrd.NamedSharding)
+    assert sharding_pytree['d']['e'].spec == shrd.PartitionSpec('mp')
+
+def test_get_pytree_sharding_spec(dist_manager):
+    # Create a simple pytree with mixed types
+    pytree = {
+        'a': jnp.array([1., 2., 3.]),
+        'b': jnp.zeros((8,2),dtype=jnp.float32),
+        'c': 'not an array',
+        'd': {
+            'e': jnp.array([5., 6.])
+        }
+    }
+
+    # Apply different shardings to the arrays
+    pytree['a'] = jax.device_put(pytree['a'], dist_manager.uniform_sharding)
+    pytree['b'] = jax.device_put(pytree['b'], dist_manager.sharding(shrd.PartitionSpec('dp', None)))
+    pytree['d']['e'] = jax.device_put(pytree['d']['e'], dist_manager.sharding(shrd.PartitionSpec('mp')))
+
+    sharding_spec_pytree = dist_manager.get_pytree_sharding_spec(pytree)
+
+    assert isinstance(sharding_spec_pytree['a'], shrd.PartitionSpec)
+    assert sharding_spec_pytree['a'] == shrd.PartitionSpec()
+    
+    assert isinstance(sharding_spec_pytree['b'], shrd.PartitionSpec)
+    assert sharding_spec_pytree['b'] == shrd.PartitionSpec('dp', None)
+    
+    assert sharding_spec_pytree['c'] is None
+    
+    assert isinstance(sharding_spec_pytree['d']['e'], shrd.PartitionSpec)
+    assert sharding_spec_pytree['d']['e'] == shrd.PartitionSpec('mp')

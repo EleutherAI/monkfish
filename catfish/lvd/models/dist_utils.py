@@ -153,3 +153,21 @@ class DistManager:
         mhu.sync_global_devices("load_pytree_sync")
         return distributed_pytree
     
+    def get_pytree_sharding(self, pytree):
+        def get_leaf_sharding(leaf):
+            if isinstance(leaf, jax.Array):
+                return leaf.sharding
+            else:
+                return None
+
+        return jax.tree_util.tree_map(get_leaf_sharding, pytree)
+
+    def get_pytree_sharding_spec(self, pytree):
+        def get_leaf_partition_spec(leaf):
+            if isinstance(leaf, jax.Array):
+                return leaf.sharding.spec
+            else:
+                return None
+
+        return jax.tree_util.tree_map(get_leaf_partition_spec, pytree)
+    
