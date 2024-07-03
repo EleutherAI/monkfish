@@ -13,6 +13,7 @@ import jax.experimental.shard_map as shard_map
 import jax.sharding as shrd
 
 import jax.numpy as jnp
+import jax.tree_util as jtu
 
 class DistManager:
     def __init__(self, mesh_shape, filesystem):
@@ -105,8 +106,50 @@ class DistManager:
         return array
     
     def save_pytree(self, pytree, sharding_pytree, file_name):
-        pass
-    
+        # Gather all leaves of the pytree
+        flat_pytree, tree_def = jtu.tree_flatten(pytree)
+        flat_sharding_pytree, _ = jtu.tree_flatten(sharding_pytree)
+
+        # Gather each leaf to the host
+        gathered_leaves = [
+            self.gather(sharding, jnp.float32)(leaf) if leaf is not None else None
+            for leaf, sharding in zip(flat_pytree, flat_sharding_pytree)
+        ]
+
+        # Reconstruct the pytree on CPU
+        local_pytree = jtu.tree_unflatten(tree_def, gathered_leaves)
+
+        # Only have the first process write to the filesystem
+        if self.pid == 0:
+            # Ensure directory exists before writing
+            dir_name = os.path.dirname(file_name)
+            if dir_name and not self.fs.exists(dir_name):
+                self.fs.makedirs(dir_name, recreate=True)
+
+            with self.fs.openbin(file_name, 'w') as blob:
+                blob.write(pkl.dumps((local_pytree, tree_def)))
+            print(f"Uploaded {file_name} to {type(self.fs).__name__} at {file_name}")
+
+        mhu.sync_global_devices("save_pytree_sync")
+
     def load_pytree(self, sharding_pytree, file_name):
-        data_pytree = None
-        return data_pytree
+        # Load the pytree data and tree definition
+        with self.fs.openbin(file_name, 'r') as blob:
+            local_pytree, tree_def = pkl.loads(blob.read())
+
+        # Flatten the loaded pytree and the sharding pytree
+        flat_local_pytree, _ = jtu.tree_flatten(local_pytree)
+        flat_sharding_pytree, _ = jtu.tree_flatten(sharding_pytree)
+
+        # Scatter each leaf back to the distributed array
+        scattered_leaves = [
+            self.scatter(sharding, jnp.float32)(leaf) if leaf is not None else None
+            for leaf, sharding in zip(flat_local_pytree, flat_sharding_pytree)
+        ]
+
+        # Reconstruct the distributed pytree
+        distributed_pytree = jtu.tree_unflatten(tree_def, scattered_leaves)
+
+        mhu.sync_global_devices("load_pytree_sync")
+        return distributed_pytree
+    

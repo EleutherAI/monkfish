@@ -20,7 +20,8 @@ def parse_args():
     subparsers = parser.add_subparsers(dest="operation", required=True, help="Operation to perform")
 
     # Training diffusion autoencoder
-    subparsers.add_parser("train_dae", help="Train the diffusion autoencoder")
+    train_dae_parser = subparsers.add_parser("train_dae", help="Train the diffusion autoencoder")
+    train_dae_parser.add_argument("--ckpt", default=None, help="Path to checkpoint to resume training from")
     
     # Lifting videos
     lift_parser = subparsers.add_parser("lift", help="Lift videos into the diffusion latent space")

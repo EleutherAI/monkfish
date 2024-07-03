@@ -163,18 +163,17 @@ class DiffAEHarness:
         self.optimizer = optax.adam(learning_rate=opt_cfg["lr"])
         self.state["opt_state"] = self.optimizer.init(self.state["model"])
     
-    def _list_checkpoints(self):
+    def list_checkpoints(self):
         """List all checkpoint directories."""
         try:
             directories = [d for d in self.ckpt_fs.listdir('/') if self.ckpt_fs.isdir(d)]
-            checkpoint_dirs = [d for d in directories if d.startswith('ckpt_')]
+            checkpoint_dirs = [f"/{d}" for d in directories if d.startswith('ckpt_')]
             return sorted(checkpoint_dirs, key=lambda x: int(x.split('_')[1]))
         except fs.errors.ResourceNotFound:
             return []
 
-    def save_checkpoint(self, step):
+    def save_checkpoint(self, path):
         """Save a checkpoint at the given step."""
-        path = self.new_ckpt_path(step)
         
         # Ensure the checkpoint directory exists
         self.ckpt_fs.makedirs(path, recreate=True)
@@ -190,6 +189,10 @@ class DiffAEHarness:
         opt_path = f"{path}/opt_state"
         self.ckpt_fs.makedirs(opt_path, recreate=True)
 
+        print(self.state["opt_state"])
+        breakpoint()
+
+
         def save_opt_state(opt_state, prefix):
             for key, value in opt_state.items():
                 if isinstance(value, (jnp.ndarray, jax.Array)):
@@ -203,17 +206,13 @@ class DiffAEHarness:
 
         save_opt_state(self.state["opt_state"], opt_path)
 
+        exit()
+
         # Save PRNG key
         self.dist_manager.save_array(self.state["prng_key"], self.dist_manager.uniform_sharding, f"{path}/prng_key")
 
-    def load_checkpoint(self, path=None):
-        """Load a checkpoint from the given path or the latest if not specified."""
-        if path is None:
-            path = self.latest_ckpt_path()
-        
-        if path is None:
-            raise ValueError("No checkpoint found to load.")
-
+    def load_checkpoint(self, path):
+        """Load a checkpoint from the given path"""
         # Load model
         model_path = f"{path}/model"
         self.state["model"].encoder.load(f"{model_path}/encoder")
@@ -247,30 +246,33 @@ class DiffAEHarness:
         self.state["prng_key"] = self.dist_manager.load_array(self.dist_manager.uniform_sharding, f"{path}/prng_key")
 
     
-    def most_recent_ckpt(self):
+    def latest_ckpt_step(self):
         """Get the most recent checkpoint number."""
-        checkpoints = self._list_checkpoints()
+        checkpoints = self.list_checkpoints()
         if not checkpoints:
-            return 0
+            return None 
         return int(checkpoints[-1].split('_')[1])
 
+    def latest_ckpt_path(self):
+        """Get the path of the latest checkpoint."""
+        checkpoints = self.list_checkpoints()
+        if not checkpoints:
+            return None
+        return checkpoints[-1]
+    
+    def ckpt_path(self, step):
+        return f"/ckpt_{step}"
 
-    def new_ckpt_path(self, id):
-        ckpt_n = self.most_recent_ckpt()
+    def new_ckpt_path(self):
+
+        ckpt_n = self.most_recent_ckpt_step()
 
         ckpt_freq = self.cfg["diffusion_auto_encoder"]["train"]["ckpt_freq"]
         
         new_ckpt_n = ckpt_n + ckpt_freq
-        assert id == new_ckpt_n
 
-        os.path.join(self.args.ckpt_path,"ckpt_path")
-
-    def latest_ckpt_path(self):
-        """Get the path of the latest checkpoint."""
-        checkpoints = self._list_checkpoints()
-        if not checkpoints:
-            return None
-        return f'/{checkpoints[-1]}'
+        new_ckpt_path = f"/ckpt_{new_ckpt_n}"
+        return new_ckpt_path
     
 
     def train(self):
@@ -289,38 +291,55 @@ class DiffAEHarness:
         total_steps = train_cfg["total_steps"]
         log_freq = train_cfg["log_freq"]
 
-        """
         if args.ckpt:
-            self.load_checkpoint(args.ckpt)
+            #Load specified checkpoint
+            step = args.ckpt
+            ckpt_path = self.ckpt_path(step)
+            self.load_checkpoint(ckpt_path)
+        elif self.list_checkpoints():
+            #Load latest checkpoint
+            step = self.latest_ckpt_step()
+            ckpt_path = self.latest_ckpt_path()
+            #self.load_checkpoint(ckpt_path)
         else:
-            self.load_checkpoint()  # Attempt to load the latest checkpoint
+            #Start from scratch and use existing init without loading a checkpoint
+            step = 0
+
         """
-
-        #step = self.most_recent_ckpt()
-        step = 0
-
         # Initialize the data downloader
         self.sharded_data_downloader.start(step * self.sharded_data_downloader.batch_size)
+        """
 
         try:
             total_loss = 0
             log_start_step = step
             while step < total_steps:
+                
+                #Save checkpoint 
+                if step % ckpt_freq == 0:
+                    print(f"Saving checkpoint for step {step}...")
+                    ckpt_path = self.ckpt_path(step)
+                    self.save_checkpoint(ckpt_path)
+                
                 step += 1
 
                 if step > 15:
                     break
 
-                time.sleep(1)
+                time.sleep(0.1)
                 
+                """
                 # Get data from the downloader
                 data = self.sharded_data_downloader.step()
                 print("a")
+                """
 
+                """
                 # Update the model
                 loss, self.state = dc.update_state_dict(self.state, data, self.optimizer, loss_fn)
                 print("b")
                 print(loss)
+                """
 
                 """
                 # Accumulate loss
@@ -334,23 +353,22 @@ class DiffAEHarness:
                     total_loss = 0
                     log_start_step = step
                 """
-
-                """
-                if step % ckpt_freq == 0:
-                    self.save_checkpoint(step)
-                """
                 
+                """
                 # Acknowledge that we've processed the data
                 self.sharded_data_downloader.ack()
                 print("c")
+                """
 
         except KeyboardInterrupt:
             print("Training interrupted.")
         finally:
             # Always stop the data downloader when we're done
+            """
             print("d")
             self.sharded_data_downloader.stop()
             print("e")
+            """
 
         print("Training completed.")
 
