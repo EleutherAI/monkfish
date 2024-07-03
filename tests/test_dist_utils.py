@@ -4,24 +4,35 @@ import jax.numpy as jnp
 import jax.sharding as shrd
 import equinox as eqx
 import fs.memoryfs
-from your_module import DistManager  # Replace 'your_module' with the actual module name
-import catfish.lvd.diffusion_ae
+import catfish.lvd.models.dist_utils as du
 
 @pytest.fixture
 def dist_manager():
     mesh_shape = (8, 1, 1)  # Adjust based on your testing environment
     filesystem = fs.memoryfs.MemoryFS()
-    return catfish.lvd.diffusion_ae.DistManager(mesh_shape, filesystem)
+    return du.DistManager(mesh_shape, filesystem)
 
 def test_init(dist_manager):
-    assert isinstance(dist_manager, DistManager)
+    assert isinstance(dist_manager, du.DistManager)
     assert dist_manager.pid == jax.process_index()
     assert dist_manager.nodes == jax.process_count()
-    assert dist_manager.mesh_shape == (1, 1, 1)
+    assert dist_manager.mesh_shape == (8, 1, 1)
 
 def test_get_key(dist_manager):
     key = dist_manager.get_key(42)
-    assert isinstance(key, jax.random.PRNGKey)
+    
+    # Check type and shape
+    assert isinstance(key, jax.Array)
+    assert key.shape == (2,)
+    assert key.dtype == jnp.uint32
+    
+    # Check sharding
+    expected_sharding = dist_manager.uniform_sharding
+    actual_sharding = key.sharding
+    
+    assert isinstance(actual_sharding, shrd.NamedSharding)
+    assert actual_sharding.mesh == expected_sharding.mesh
+    assert actual_sharding.spec == expected_sharding.spec
 
 def test_sharding(dist_manager):
     partition_spec = shrd.PartitionSpec("dp", "mp")
