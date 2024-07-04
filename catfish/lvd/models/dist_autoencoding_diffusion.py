@@ -69,23 +69,6 @@ class Encoder(eqx.Module):
         y = h
         return y
 
-    def save(self, path_prefix):
-        for i,layer in enumerate(self.layers):
-            path = os.path.join(path_prefix,f"encoder_layer_{i}")
-            layer.save(path)
-    
-    def load(self, path_prefix):
-        new_self = self
-        
-        for i in range(len(self.layers)):
-            path = os.path.join(path_prefix, f"encoder_layer_{i}")
-            layer = self.layers[i].load(path)
-            where = lambda x: x.layers[i]
-            new_self = eqx.tree_at(where, new_self, layer)
-
-        return new_self
-
-
 class Decoder(eqx.Module):
     #[32 x 32 x 32] x [3 x 512 x 256] x [] -> [3 x 512 x 256]
     layers: list
@@ -118,29 +101,3 @@ class Decoder(eqx.Module):
         y_patches = h
         y = reconstruct_from_patches(y_patches)
         return y
-
-    def save(self, path_prefix):
-        for i,layer in enumerate(self.layers):
-            path = os.path.join(path_prefix,f"decoder_layer_{i}")
-            layer.save(path)
-        
-        path = os.path.join(path_prefix,f"decoder_unembed")
-        self.decode_embed.save(path)
-    
-    def load(self, path_prefix):
-        new_self = self
-        
-        for i in range(len(self.layers)):
-            path = os.path.join(path_prefix, f"decoder_layer_{i}")
-            layer = self.layers[i].load(path)
-            where = lambda x: x.layers[i]
-            new_self = eqx.tree_at(where, new_self, layer)
-        
-        path = os.path.join(path_prefix,f"decoder_unembed")
-        decode_embed = self.decode_embed.load(path)
-        where = lambda x: x.decode_embed
-        new_self = eqx.tree_at(where, new_self, decode_embed)
-
-        return new_self
-    
-
