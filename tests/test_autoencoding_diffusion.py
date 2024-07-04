@@ -33,18 +33,22 @@ def test_save_load_consistency(dist_manager, prng_key, input_image):
     encoded_initial = encoder_initial(input_image)
     decoded_initial = decoder_initial(input_image, encoded_initial)
 
-    # Save models
-    encoder_initial.save("/test/encoder")
-    decoder_initial.save("/test/decoder")
+    # Save models using dist_manager
+    encoder_sharding = dist_manager.get_pytree_sharding(encoder_initial)
+    decoder_sharding = dist_manager.get_pytree_sharding(decoder_initial)
+    dist_manager.save_pytree(encoder_initial, encoder_sharding, "/test/encoder")
+    dist_manager.save_pytree(decoder_initial, decoder_sharding, "/test/decoder")
 
     # Reinstance models with new keys
     key_reloaded = jax.random.split(key[1], 3)
     encoder_reloaded = dad.Encoder(dist_manager, key_reloaded[0], k=2, n_layers=2)
     decoder_reloaded = dad.Decoder(dist_manager, key_reloaded[1], k=2, n_layers=2)
 
-    # Load models
-    encoder_reloaded = encoder_reloaded.load("/test/encoder")
-    decoder_reloaded = decoder_reloaded.load("/test/decoder")
+    # Load models using dist_manager
+    encoder_new_sharding = dist_manager.get_pytree_sharding(encoder_reloaded)
+    decoder_new_sharding = dist_manager.get_pytree_sharding(decoder_reloaded)
+    encoder_reloaded = dist_manager.load_pytree(encoder_new_sharding, "/test/encoder")
+    decoder_reloaded = dist_manager.load_pytree(decoder_new_sharding, "/test/decoder")
 
     # Verify consistency after load
     encoded_reloaded = encoder_reloaded(input_image)
@@ -53,7 +57,6 @@ def test_save_load_consistency(dist_manager, prng_key, input_image):
     # Check that the outputs after reload are consistent with the initial outputs
     assert jnp.allclose(encoded_initial, encoded_reloaded, atol=1e-5), "Encoder outputs do not match after reload."
     assert jnp.allclose(decoded_initial, decoded_reloaded, atol=1e-5), "Decoder outputs do not match after reload."
-
 
 def test_patch_reconstruction_integrity(input_image):
     patches = dad.reshape_to_patches(input_image)

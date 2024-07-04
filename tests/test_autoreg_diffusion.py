@@ -35,15 +35,17 @@ def test_save_load_consistency(dist_manager, prng_key, input_image):
     # Process input image
     denoise_initial = transformer_ardm_initial(true_x, noise_x, txt)
 
-    # Save models
-    transformer_ardm_initial.save("/test/transformer_ardm")
+    # Save model using dist_manager
+    sharding_initial = dist_manager.get_pytree_sharding(transformer_ardm_initial)
+    dist_manager.save_pytree(transformer_ardm_initial, sharding_initial, "/test/transformer_ardm")
 
-    # Reinstance models with new keys
+    # Reinstance model with new key
     transformer_ardm_reloaded = dad.TransformerARDM(dist_manager, key[1], res_dim=128, 
             io_dim=128, vocab=128, n_layers=2, mlp_dim=256, qk_dim=128, v_dim=128, n_head=8)
 
-    # Load models
-    transformer_ardm_reloaded = transformer_ardm_reloaded.load("/test/transformer_ardm")
+    # Load model using dist_manager
+    sharding_reloaded = dist_manager.get_pytree_sharding(transformer_ardm_reloaded)
+    transformer_ardm_reloaded = dist_manager.load_pytree(sharding_reloaded, "/test/transformer_ardm")
 
     # Verify consistency after load
     denoise_reloaded = transformer_ardm_reloaded(true_x, noise_x, txt)
