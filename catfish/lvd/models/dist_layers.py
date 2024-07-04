@@ -171,7 +171,7 @@ class ShrdConv(eqx.Module):
     dist_manager: du.DistManager = eqx.field(static=True)
     kernel: jax.Array
     bias: jax.Array
-    scale: jax.Array
+    scale: jax.Array = eqx.field(static=True)
     padding: str = eqx.field(static=True)
     
     def _f_dict(self):
@@ -222,7 +222,7 @@ class ShrdLinear(eqx.Module):
     dist_manager: du.DistManager = eqx.field(static=True)
     weight: jax.Array
     bias: jax.Array | None
-    scale: jax.Array
+    scale: jax.Array = eqx.field(static=True)
     
     def _f_dict(self):
         pre_dict = {
@@ -261,7 +261,6 @@ class ShrdLinear(eqx.Module):
         return y
 
 class ConvResBlock(eqx.Module):
-    dist_manager: du.DistManager = eqx.field(static=True)
     layer1: ShrdConv
     layer2: ShrdConv
 
