@@ -244,10 +244,8 @@ class DiffAEHarness:
             #Start from scratch and use existing init without loading a checkpoint
             step = 0
 
-        """
         # Initialize the data downloader
         self.sharded_data_downloader.start(step * self.sharded_data_downloader.batch_size)
-        """
 
         try:
             total_loss = 0
@@ -262,23 +260,19 @@ class DiffAEHarness:
                 
                 step += 1
 
-                if step > 15:
+                if step > 35:
                     break
 
-                time.sleep(0.1)
+                time.sleep(1)
                 
-                """
                 # Get data from the downloader
                 data = self.sharded_data_downloader.step()
                 print("a")
-                """
 
-                """
                 # Update the model
                 loss, self.state = dc.update_state_dict(self.state, data, self.optimizer, loss_fn)
                 print("b")
                 print(loss)
-                """
 
                 """
                 # Accumulate loss
@@ -293,21 +287,17 @@ class DiffAEHarness:
                     log_start_step = step
                 """
                 
-                """
                 # Acknowledge that we've processed the data
                 self.sharded_data_downloader.ack()
                 print("c")
-                """
 
         except KeyboardInterrupt:
             print("Training interrupted.")
         finally:
             # Always stop the data downloader when we're done
-            """
             print("d")
             self.sharded_data_downloader.stop()
             print("e")
-            """
 
         print("Training completed.")
 
