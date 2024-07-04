@@ -175,76 +175,15 @@ class DiffAEHarness:
     def save_checkpoint(self, path):
         """Save a checkpoint at the given step."""
         
-        # Ensure the checkpoint directory exists
-        self.ckpt_fs.makedirs(path, recreate=True)
-
-        # Save model
-        model_path = f"{path}/model"
-        self.ckpt_fs.makedirs(f"{model_path}/encoder", recreate=True)
-        self.ckpt_fs.makedirs(f"{model_path}/decoder", recreate=True)
-        self.state["model"].encoder.save(f"{model_path}/encoder")
-        self.state["model"].decoder.save(f"{model_path}/decoder")
-
-        # Save optimizer state
-        opt_path = f"{path}/opt_state"
-        self.ckpt_fs.makedirs(opt_path, recreate=True)
-
-        print(self.state["opt_state"])
-        breakpoint()
-
-
-        def save_opt_state(opt_state, prefix):
-            for key, value in opt_state.items():
-                if isinstance(value, (jnp.ndarray, jax.Array)):
-                    self.dist_manager.save_array(value, self.dist_manager.uniform_sharding, f"{prefix}/{key}")
-                elif isinstance(value, (dict, optax.EmptyState)):
-                    save_opt_state(value, f"{prefix}/{key}")
-                else:
-                    # For scalar values or other types, save using regular pickle
-                    with self.ckpt_fs.open(f"{prefix}/{key}.pkl", 'wb') as f:
-                        pkl.dump(value, f)
-
-        save_opt_state(self.state["opt_state"], opt_path)
-
-        exit()
-
-        # Save PRNG key
-        self.dist_manager.save_array(self.state["prng_key"], self.dist_manager.uniform_sharding, f"{path}/prng_key")
+        ckpt_file_path = f"{path}/ckpt.pkl"
+        sharding_pytree = self.dist_manager.get_pytree_sharding(self.state)
+        self.dist_manager.save_pytree(self.state, sharding_pytree, ckpt_file_path)
 
     def load_checkpoint(self, path):
         """Load a checkpoint from the given path"""
-        # Load model
-        model_path = f"{path}/model"
-        self.state["model"].encoder.load(f"{model_path}/encoder")
-        self.state["model"].decoder.load(f"{model_path}/decoder")
-
-        # Load optimizer state
-        opt_path = f"{path}/opt_state"
-
-        def load_opt_state(prefix):
-            opt_state = {}
-            for item in self.ckpt_fs.listdir(prefix):
-                item_path = f"{prefix}/{item}"
-                if self.ckpt_fs.isdir(item_path):
-                    opt_state[item] = load_opt_state(item_path)
-                elif item.endswith('.pkl'):
-                    with self.ckpt_fs.open(item_path, 'rb') as f:
-                        opt_state[item[:-4]] = pkl.load(f)
-                else:
-                    opt_state[item] = self.dist_manager.load_array(self.dist_manager.uniform_sharding, item_path)
-            return opt_state
-
-        self.state["opt_state"] = load_opt_state(opt_path)
-
-        # Reconstruct the OptState object
-        self.state["opt_state"] = jtu.tree_map(
-            lambda x: x if isinstance(x, (optax.EmptyState, dict)) else x,
-            self.state["opt_state"]
-        )
-
-        # Load PRNG key
-        self.state["prng_key"] = self.dist_manager.load_array(self.dist_manager.uniform_sharding, f"{path}/prng_key")
-
+        ckpt_file_path = f"{path}/ckpt.pkl"
+        sharding_pytree = self.dist_manager.get_pytree_sharding(self.state)
+        self.state = self.dist_manager.load_pytree(sharding_pytree, ckpt_file_path)
     
     def latest_ckpt_step(self):
         """Get the most recent checkpoint number."""

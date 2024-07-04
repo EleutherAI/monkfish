@@ -106,8 +106,8 @@ class DistManager:
         return array
     
     def save_pytree(self, pytree, sharding_pytree, file_name):
-        # Gather all leaves of the pytree
-        flat_pytree, tree_def = jtu.tree_flatten(pytree)
+        # Flatten the pytree and sharding_pytree
+        flat_pytree, _ = jtu.tree_flatten(pytree)
         flat_sharding_pytree, _ = jtu.tree_flatten(sharding_pytree)
 
         # Gather each leaf to the host
@@ -115,9 +115,6 @@ class DistManager:
             self.gather(sharding, jnp.float32)(leaf) if leaf is not None else None
             for leaf, sharding in zip(flat_pytree, flat_sharding_pytree)
         ]
-
-        # Reconstruct the pytree on CPU
-        local_pytree = jtu.tree_unflatten(tree_def, gathered_leaves)
 
         # Only have the first process write to the filesystem
         if self.pid == 0:
@@ -127,32 +124,32 @@ class DistManager:
                 self.fs.makedirs(dir_name, recreate=True)
 
             with self.fs.openbin(file_name, 'w') as blob:
-                blob.write(pkl.dumps((local_pytree, tree_def)))
+                blob.write(pkl.dumps(gathered_leaves))
             print(f"Uploaded {file_name} to {type(self.fs).__name__} at {file_name}")
 
         mhu.sync_global_devices("save_pytree_sync")
 
     def load_pytree(self, sharding_pytree, file_name):
-        # Load the pytree data and tree definition
+        # Load the gathered leaves
         with self.fs.openbin(file_name, 'r') as blob:
-            local_pytree, tree_def = pkl.loads(blob.read())
+            gathered_leaves = pkl.loads(blob.read())
 
-        # Flatten the loaded pytree and the sharding pytree
-        flat_local_pytree, _ = jtu.tree_flatten(local_pytree)
-        flat_sharding_pytree, _ = jtu.tree_flatten(sharding_pytree)
+        # Flatten the sharding pytree
+        flat_sharding_pytree, tree_def = jtu.tree_flatten(sharding_pytree)
 
         # Scatter each leaf back to the distributed array
         scattered_leaves = [
             self.scatter(sharding, jnp.float32)(leaf) if leaf is not None else None
-            for leaf, sharding in zip(flat_local_pytree, flat_sharding_pytree)
+            for leaf, sharding in zip(gathered_leaves, flat_sharding_pytree)
         ]
 
-        # Reconstruct the distributed pytree
+        # Reconstruct the distributed pytree using the tree structure from sharding_pytree
         distributed_pytree = jtu.tree_unflatten(tree_def, scattered_leaves)
 
         mhu.sync_global_devices("load_pytree_sync")
         return distributed_pytree
-    
+
+
     def get_pytree_sharding(self, pytree):
         def get_leaf_sharding(leaf):
             if isinstance(leaf, jax.Array):
