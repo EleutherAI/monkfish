@@ -2,6 +2,7 @@ import os
 import io
 import sys
 import time
+import pickle
 
 import numpy as np
 
@@ -322,7 +323,8 @@ class ImageWorkerInterface:
         
         image = Image.open(io.BytesIO(image_data))
         image_array = np.array(image)
-        return image_array, example_id
+        normed_image_array = image_array/255 - 0.5
+        return normed_image_array, example_id
 
     def list_dir(self):
         """
@@ -353,7 +355,6 @@ class ImageShardInterface:
         jax_array = jnp.array(np_array)
         scatter_fn = self.dist_manager.scatter(sharding, jnp.float32)
         sharded_array = scatter_fn(jax_array)
-        jax.debug.inspect_array_sharding(sharded_array, callback=print)
         return sharded_array
     
     def accelerator_to_host(self, global_data):
@@ -451,14 +452,79 @@ class VideoShardInterface:
     
     def accelerator_to_host(self, global_data):
         pass
-    
+
 
 class LatentWorkerInterface:
-    pass
+    """Interface to Latent data, folder is a dataset, 1 train example per file"""
+
+    def __init__(self, fs):
+        self.fs = fs
+        self.files = sorted([f for f in self.fs.listdir('/') if f.lower().endswith('.pkl')])
+        if not self.files:
+            raise ValueError("The directory is empty or contains no pickle files.")
+
+    def get_example(self, example_id):
+        """
+        Fetch a latent example, process it, and handle looping through files.
+        `example_id` is used to select the pickle file.
+        Returns a tuple containing the string and numpy array from the pickle file.
+        """
+        num_files = len(self.files)
+        file_index = example_id % num_files  # Ensure looping over the files
+        file_name = self.files[file_index]
+        
+        with self.fs.open(file_name, 'rb') as latent_file:
+            data = pickle.load(latent_file)
+        
+        return data, example_id
+
+    def list_dir(self):
+        """
+        List all examples in the folder.
+        """
+        return self.files
+
+    def upload_example(self, example_id, data):
+        """
+        Upload a processed latent example back to the filesystem.
+        """
+        file_name = f'{example_id}.pkl'
+        
+        with self.fs.open(file_name, 'wb') as fs_file:
+            pickle.dump(data, fs_file)
 
 class LatentShardInterface:
-    def list_dir():
-        #List all examples in folder
-        pass
+    """Interface to Latent data for sharding"""
 
+    def __init__(self, dist_manager):
+        self.dist_manager = dist_manager
+
+    def host_to_accelerator(self, local_data, batch_size):
+        strings = [item[0][0] for item in local_data]  # Extracting strings
+        arrays = [item[0][1] for item in local_data]  # Extracting numpy arrays
+        
+        # Stack the arrays
+        np_array = np.stack(arrays).astype(np.float32)
+        
+        mesh = self.dist_manager.mesh
+        p_spec = shrd.PartitionSpec("dp")
+        sharding = shrd.NamedSharding(mesh, p_spec)
+        jax_array = jnp.array(np_array)
+        scatter_fn = self.dist_manager.scatter(sharding, jnp.float32)
+        sharded_array = scatter_fn(jax_array)
+        
+        return strings, sharded_array
+    
+    def accelerator_to_host(self, global_data):
+        # Assuming global_data is a tuple of (strings, sharded_array)
+        strings, sharded_array = global_data
+        
+        # Gather the sharded array back to host
+        gather_fn = self.dist_manager.gather()
+        np_array = np.array(gather_fn(sharded_array))
+        
+        # Combine strings and arrays back into the original format
+        local_data = [(s, arr) for s, arr in zip(strings, np_array)]
+        
+        return local_data
 

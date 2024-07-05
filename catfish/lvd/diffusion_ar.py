@@ -10,13 +10,10 @@ import jax.numpy as jnp
 import optax
 import pickle as pkl
 
-import catfish.lvd.models.dist_autoencoding_diffusion as daed
+import catfish.lvd.models.dist_autoreg_diffusion as dard
 import catfish.lvd.models.dist_utils as du
 import catfish.lvd.shrd_data_loader as sdl
 import catfish.lvd.diffusion_core as dc
-
-
-DAEModel = collections.namedtuple('DAEModel', ['encoder', 'decoder'])
 
 class DiffARHarness:
     """Sharded Diffusion autoencoder harness"""
@@ -60,7 +57,7 @@ class DiffARHarness:
         gcp_bucket_name =  gcp_conf["gcp_bucket_name"]
 
         #Initialize data loader file system
-        dl_conf = self.cfg["diffusion_auto_encoder"]["data_loader"]
+        dl_conf = self.cfg["transformer_ardm"]["data_loader"]
         dl_fs_type = dl_conf["fs_type"]
         dl_root_directory = dl_conf["data_root_directory"]
 
@@ -80,7 +77,7 @@ class DiffARHarness:
             raise Exception(f"Invalid fs_type provided, provided {dl_fs_type}")
         
         #Initialize checkpoint filesystem
-        ckpt_conf = self.cfg["diffusion_auto_encoder"]["checkpoints"]
+        ckpt_conf = self.cfg["transformer_ardm"]["checkpoints"]
         ckpt_fs_type = ckpt_conf["fs_type"]
         ckpt_root_directory = ckpt_conf["ckpt_root_directory"]
         
@@ -96,7 +93,7 @@ class DiffARHarness:
 
     def init_data_loader(self):
         operation = self.args.operation
-        dl_conf = self.cfg["diffusion_auto_encoder"]["data_loader"]
+        dl_conf = self.cfg["transformer_ardm"]["data_loader"]
 
         if operation == "train_dae":
             worker_interface_cls = sdl.ImageWorkerInterface
@@ -126,39 +123,35 @@ class DiffARHarness:
         )
 
     def init_dist_manager(self):
-        dm_cfg = self.cfg["diffusion_auto_encoder"]["dist_manager"]
+        dm_cfg = self.cfg["transformer_ardm"]["dist_manager"]
 
         mesh_shape = dm_cfg["mesh_shape"]
 
         self.dist_manager = du.DistManager(mesh_shape, self.ckpt_fs)
     
     def make_model(self):
-        model_conf = self.cfg["diffusion_auto_encoder"]["model"]
-        enc_conf = model_conf["encoder"]
-        dec_conf = model_conf["decoder"]
+        model_conf = self.cfg["transformer_ardm"]["model"]
 
         seed = self.cfg["seed"]
         self.state["prng_key"] = self.dist_manager.get_key(seed)
         
-        self.state["prng_key"], enc_key, dec_key = jax.random.split(self.state["prng_key"],3)
+        self.state["prng_key"], model_key = jax.random.split(self.state["prng_key"], 2)
 
-        self.state["model"] = DAEModel(
-            encoder=daed.Encoder(
-                self.dist_manager, 
-                key=enc_key, 
-                k =enc_conf["k"],
-                n_layers=enc_conf["n_layers"]
-            ),
-            decoder=daed.Decoder(
-                self.dist_manager, 
-                key=dec_key, 
-                k =dec_conf["k"],
-                n_layers=dec_conf["n_layers"]
-            )
+        self.state["model"] = dard.TransformerARDM(
+            self.dist_manager,
+            key=model_key,
+            res_dim=model_conf["res_dim"],
+            io_dim=model_conf["io_dim"],
+            vocab=model_conf["vocab"],
+            n_layers=model_conf["n_layers"],
+            mlp_dim=model_conf["mlp_dim"],
+            qk_dim=model_conf["qk_dim"],
+            v_dim=model_conf["v_dim"],
+            n_dim=model_conf["n_dim"]
         )
     
     def make_optimizer(self):
-        opt_cfg = self.cfg["diffusion_auto_encoder"]["train"]
+        opt_cfg = self.cfg["transformer_ardm"]["train"]
         
         self.optimizer = optax.adam(learning_rate=opt_cfg["lr"])
         self.state["opt_state"] = self.optimizer.init(self.state["model"])
@@ -206,7 +199,7 @@ class DiffARHarness:
 
         ckpt_n = self.most_recent_ckpt_step()
 
-        ckpt_freq = self.cfg["diffusion_auto_encoder"]["train"]["ckpt_freq"]
+        ckpt_freq = self.cfg["transformer_ardm"]["train"]["ckpt_freq"]
         
         new_ckpt_n = ckpt_n + ckpt_freq
 
@@ -225,7 +218,7 @@ class DiffARHarness:
         args = self.args
         cfg = self.cfg
 
-        train_cfg = cfg["diffusion_auto_encoder"]["train"]
+        train_cfg = cfg["transformer_ardm"]["train"]
         ckpt_freq = train_cfg["ckpt_freq"]
         total_steps = train_cfg["total_steps"]
         log_freq = train_cfg["log_freq"]

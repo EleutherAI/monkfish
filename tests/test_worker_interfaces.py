@@ -1,7 +1,7 @@
-
 import io
 import os
 import tempfile
+import pickle
 
 import pytest
 import numpy as np
@@ -10,6 +10,9 @@ import fs.memoryfs
 import catfish.lvd.shrd_data_loader as sdl
 import moviepy.editor
 import mutagen.mp4
+import jax
+import jax.numpy as jnp
+
 
 @pytest.fixture
 def mock_image_fs():
@@ -20,6 +23,18 @@ def mock_image_fs():
         img = Image.new('RGB', (100, 100), color=(i*50, i*50, i*50))
         with memory_fs.open(f'image_{i}.jpg', 'wb') as f:
             img.save(f, format='JPEG')
+    
+    return memory_fs
+
+@pytest.fixture
+def mock_latent_fs():
+    memory_fs = fs.memoryfs.MemoryFS()
+    
+    # Create some test latent data
+    for i in range(5):
+        data = (f"String {i}", np.random.rand(10, 10).astype(np.float32))
+        with memory_fs.open(f'{i+1}.pkl', 'wb') as f:
+            pickle.dump(data, f)
     
     return memory_fs
 
@@ -61,6 +76,28 @@ def mock_video_fs():
             mp4.save(f)
 
     return memory_fs
+
+@pytest.fixture
+def latent_worker(mock_latent_fs):
+    return sdl.LatentWorkerInterface(mock_latent_fs)
+
+@pytest.fixture
+def mock_dist_manager():
+    class MockDistManager:
+        def __init__(self):
+            self.mesh = jax.sharding.Mesh(np.array([jax.local_devices()]), ('dp',))
+        
+        def scatter(self, sharding, dtype):
+            return lambda x: jax.device_put(x, sharding)
+        
+        def gather(self):
+            return lambda x: np.array(x)
+    
+    return MockDistManager()
+
+@pytest.fixture
+def latent_shard_interface(mock_dist_manager):
+    return sdl.LatentShardInterface(mock_dist_manager)
 
 @pytest.fixture
 def image_worker(mock_image_fs):
@@ -129,3 +166,92 @@ def test_video_empty_directory():
     with pytest.raises(ValueError, match="The directory is empty or contains no MP4 files."):
         sdl.VideoWorkerInterface(empty_fs)
 
+def test_latent_init(mock_latent_fs):
+    worker = sdl.LatentWorkerInterface(mock_latent_fs)
+    assert len(worker.files) == 5
+    assert worker.files == ['1.pkl', '2.pkl', '3.pkl', '4.pkl', '5.pkl']
+
+def test_latent_get_example(latent_worker):
+    data, example_id = latent_worker.get_example(0)
+    assert isinstance(data, tuple)
+    assert isinstance(data[0], str)
+    assert isinstance(data[1], np.ndarray)
+    assert data[1].shape == (10, 10)
+    assert example_id == 0
+
+    # Test looping behavior
+    data, example_id = latent_worker.get_example(5)
+    assert example_id == 5
+    assert data == latent_worker.get_example(0)[0]
+
+def test_latent_list_dir(latent_worker):
+    files = latent_worker.list_dir()
+    assert len(files) == 5
+    assert files == ['1.pkl', '2.pkl', '3.pkl', '4.pkl', '5.pkl']
+
+def test_latent_empty_directory():
+    empty_fs = fs.memoryfs.MemoryFS()
+    with pytest.raises(ValueError, match="The directory is empty or contains no pickle files."):
+        sdl.LatentWorkerInterface(empty_fs)
+
+def test_latent_upload_example(latent_worker, mock_latent_fs):
+    data = ("Test string", np.random.rand(10, 10).astype(np.float32))
+    latent_worker.upload_example(6, data)
+    
+    assert '6.pkl' in mock_latent_fs.listdir('/')
+    
+    with mock_latent_fs.open('6.pkl', 'rb') as f:
+        loaded_data = pickle.load(f)
+    
+    assert loaded_data[0] == data[0]
+    np.testing.assert_array_equal(loaded_data[1], data[1])
+
+def test_latent_shard_interface_host_to_accelerator(latent_shard_interface):
+    local_data = [
+        (("String 1", np.random.rand(10, 10).astype(np.float32)), 0),
+        (("String 2", np.random.rand(10, 10).astype(np.float32)), 1),
+    ]
+    
+    strings, sharded_array = latent_shard_interface.host_to_accelerator(local_data, 2)
+    
+    assert strings == ["String 1", "String 2"]
+    assert isinstance(sharded_array, jax.Array)
+    assert sharded_array.shape == (2, 10, 10)
+
+def test_latent_shard_interface_accelerator_to_host(latent_shard_interface):
+    strings = ["String 1", "String 2"]
+    array = np.random.rand(2, 10, 10).astype(np.float32)
+    sharded_array = jax.device_put(array)
+    
+    global_data = (strings, sharded_array)
+    
+    local_data = latent_shard_interface.accelerator_to_host(global_data)
+    
+    assert len(local_data) == 2
+    assert local_data[0][0] == "String 1"
+    assert local_data[1][0] == "String 2"
+    np.testing.assert_array_equal(local_data[0][1], array[0])
+    np.testing.assert_array_equal(local_data[1][1], array[1])
+
+def test_latent_end_to_end(latent_worker, latent_shard_interface):
+    # Get examples from worker
+    examples = [latent_worker.get_example(i) for i in range(2)]
+    
+    # Pass through shard interface
+    strings, sharded_array = latent_shard_interface.host_to_accelerator(examples, 2)
+    
+    # Simulate some processing
+    processed_array = jax.numpy.square(sharded_array)
+    
+    # Pass back through shard interface
+    processed_data = latent_shard_interface.accelerator_to_host((strings, processed_array))
+    
+    # Upload processed data
+    for i, (data, _) in enumerate(processed_data):
+        latent_worker.upload_example(i + 10, data)  # Use new IDs to avoid overwriting
+    
+    # Verify uploaded data
+    for i in range(2):
+        uploaded_data, _ = latent_worker.get_example(i + 10)
+        assert uploaded_data[0] == strings[i]
+        np.testing.assert_array_equal(uploaded_data[1], processed_array[i])

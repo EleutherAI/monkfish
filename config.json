@@ -46,6 +46,16 @@
         }
     },
     "transformer_ardm":{
+        "dist_manager":{
+            "mesh_shape": [8,1,1]
+        },
+        "data_loader": {
+            "fs_type": "local",
+            "data_root_directory": "../dummy_image_data",
+            "workers_per_node": 1,
+            "batch_size": 32,
+            "queue_depth": 10
+        },
         "model": {
             "res_dim": 512,
             "io_dim": 512,
@@ -57,7 +67,14 @@
         },
         "train": {
             "lr":0.0001,
-            "warmup_steps": 1000
+            "warmup_steps": 1000,
+            "ckpt_freq": 5,
+            "log_freq": 50,
+            "total_steps": 10000
+        },
+        "checkpoints": {
+            "fs_type": "local",
+            "ckpt_root_directory": "../checkpoints"
         }
     }
 }
