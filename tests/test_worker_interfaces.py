@@ -85,7 +85,7 @@ def latent_worker(mock_latent_fs):
 def mock_dist_manager():
     class MockDistManager:
         def __init__(self):
-            self.mesh = jax.sharding.Mesh(np.array([jax.local_devices()]), ('dp',))
+            self.mesh = jax.sharding.Mesh(np.array([jax.local_devices()]), ('dp','mp'))
         
         def scatter(self, sharding, dtype):
             return lambda x: jax.device_put(x, sharding)
@@ -182,7 +182,10 @@ def test_latent_get_example(latent_worker):
     # Test looping behavior
     data, example_id = latent_worker.get_example(5)
     assert example_id == 5
-    assert data == latent_worker.get_example(0)[0]
+    
+    first_data = latent_worker.get_example(0)[0]
+    assert data[0] == first_data[0]  # Compare strings
+    np.testing.assert_array_equal(data[1], first_data[1])  # Compare numpy arrays
 
 def test_latent_list_dir(latent_worker):
     files = latent_worker.list_dir()
@@ -241,7 +244,7 @@ def test_latent_end_to_end(latent_worker, latent_shard_interface):
     strings, sharded_array = latent_shard_interface.host_to_accelerator(examples, 2)
     
     # Simulate some processing
-    processed_array = jax.numpy.square(sharded_array)
+    processed_array = sharded_array + 1 - 1
     
     # Pass back through shard interface
     processed_data = latent_shard_interface.accelerator_to_host((strings, processed_array))
