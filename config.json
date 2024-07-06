@@ -57,6 +57,7 @@
             "queue_depth": 10
         },
         "model": {
+            "n_dim": 512,
             "res_dim": 512,
             "io_dim": 512,
             "vocab": 256,
