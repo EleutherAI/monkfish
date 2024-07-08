@@ -333,8 +333,25 @@ class ImageWorkerInterface:
         return self.files
 
     def upload_example(self, example_id, image_data):
-        """ Optionally implement this if needed to upload processed images back to the filesystem. """
-        pass
+        """
+        Upload a processed image back to the filesystem.
+        :param example_id: Integer, unique identifier for the example.
+        :param image_data: Numpy array, the image data to be uploaded.
+        """
+        file_name = f'image_{example_id}.png'  # Define the file name pattern
+        
+        # Convert the numpy array back to an image
+        image = Image.fromarray((image_data * 255 + 0.5).astype('uint8'))  # Undo normalization
+        
+        # Save the image to a bytes buffer
+        with io.BytesIO() as buffer:
+            image.save(buffer, format='PNG')
+            buffer.seek(0)
+            
+            # Upload to filesystem
+            with self.fs.open(file_name, 'wb') as fs_file:
+                fs_file.write(buffer.getvalue())
+                print(f'Uploaded {file_name} successfully.')
 
 class ImageShardInterface:
     """Interface to image data, folder is a dataset, 1 train example per file"""
