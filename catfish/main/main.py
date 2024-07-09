@@ -4,7 +4,7 @@ import multiprocessing
 
 
 import catfish.lvd.diffusion_ae as dae
-#import catfish.lvd.diffusion_ar as dar
+import catfish.lvd.diffusion_ar as dar
 
 def configure_globals():
     multiprocessing.set_start_method('spawn')
@@ -121,16 +121,17 @@ def lift_videos(config, args):
 def train_autoregressive_diffusion_model(config, args):
     print(f"Training autoregressive diffusion model with config {config} in {args.mode} mode")
 
-    def actor_factory():
+    def ardm_harness_factory():
         return dar.DiffARHarness(
-            # Add necessary parameters from config
+            args,
+            config
         )
 
     backend = config.get("backend", "cpu")
     if args.mode == "local":
         if backend == "tpu":
-            # TODO: Implement local TPU training
-            pass
+            ardm_harness = ardm_harness_factory()
+            ardm_harness.train()
         elif backend == "gpu":
             # TODO: Implement local GPU training
             pass
