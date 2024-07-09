@@ -1,4 +1,4 @@
-# Catfish: Distributed latent video model training on TPUs
+# Monkfish: Distributed latent video model training on TPUs (and other stuff maybe)
 
 This is the training code for a 2 stage autoregressive video model.
 
