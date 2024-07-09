@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 
-import catfish.lvd.models.dist_layers as dl
+import monkfish.lvd.models.dist_layers as dl
 
 def reshape_to_patches(data, patch_width=16, patch_height=8):
     "take a large image and convert chunks of it into channels"

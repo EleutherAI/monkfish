@@ -2,9 +2,9 @@ import pytest
 import jax
 import jax.numpy as jnp
 
-import catfish.lvd.models.dist_layers as dl
-import catfish.lvd.models.dist_utils as du
-import catfish.lvd.models.dist_autoencoding_diffusion as dad
+import monkfish.lvd.models.dist_layers as dl
+import monkfish.lvd.models.dist_utils as du
+import monkfish.lvd.models.dist_autoencoding_diffusion as dad
 
 def test_encoder_decoder_initialization(dist_manager, prng_key):
     key = jax.random.split(prng_key, 2)

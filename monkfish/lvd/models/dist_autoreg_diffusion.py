@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 
-import catfish.lvd.models.dist_layers as dl
+import monkfish.lvd.models.dist_layers as dl
 
 class TransformerARDM(eqx.Module):
     

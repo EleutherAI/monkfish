@@ -7,7 +7,7 @@ import glob
 import requests
 import fabric as fa
 
-import catfish.tpu.tpu_constants as tc 
+import monkfish.tpu.tpu_constants as tc 
 
 DEFAULT_POLL_PERIOD=10
 

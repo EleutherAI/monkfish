@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import jax.sharding as shrd
 import equinox as eqx
 import fs.memoryfs
-import catfish.lvd.models.dist_utils as du
+import monkfish.lvd.models.dist_utils as du
 
 @pytest.fixture
 def dist_manager():

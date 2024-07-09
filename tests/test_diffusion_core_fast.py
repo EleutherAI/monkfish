@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 
-import catfish.lvd.diffusion_core as dc
+import monkfish.lvd.diffusion_core as dc
 
 # A simple model for testing purposes
 class SimpleModel(eqx.Module):

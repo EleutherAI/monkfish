@@ -3,8 +3,8 @@ import json
 import multiprocessing
 
 
-import catfish.lvd.diffusion_ae as dae
-import catfish.lvd.diffusion_ar as dar
+import monkfish.lvd.diffusion_ae as dae
+import monkfish.lvd.diffusion_ar as dar
 
 def configure_globals():
     multiprocessing.set_start_method('spawn')

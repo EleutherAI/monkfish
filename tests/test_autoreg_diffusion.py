@@ -2,9 +2,9 @@ import pytest
 import jax
 import jax.numpy as jnp
 
-import catfish.lvd.models.dist_layers as dl
-import catfish.lvd.models.dist_utils as du
-import catfish.lvd.models.dist_autoreg_diffusion as dad
+import monkfish.lvd.models.dist_layers as dl
+import monkfish.lvd.models.dist_utils as du
+import monkfish.lvd.models.dist_autoreg_diffusion as dad
 
 def test_transformer_ardm_initialization(dist_manager, prng_key):
     transformer_ardm = dad.TransformerARDM(dist_manager, prng_key, res_dim=128, 

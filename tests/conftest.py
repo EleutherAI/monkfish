@@ -2,7 +2,7 @@ import pytest
 import jax
 import fs.memoryfs
 
-import catfish.lvd.models.dist_utils as du
+import monkfish.lvd.models.dist_utils as du
 
 @pytest.fixture
 def dist_manager():

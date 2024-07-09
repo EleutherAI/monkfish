@@ -1,5 +1,5 @@
-import catfish.tpu as tpu
-import catfish.tpu.infrastructure as tpu_infra
+import monkfish.tpu as tpu
+import monkfish.tpu.infrastructure as tpu_infra
 import time
 import os
 import pickle

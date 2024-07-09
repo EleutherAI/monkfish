@@ -10,10 +10,10 @@ import jax.numpy as jnp
 import optax
 import pickle as pkl
 
-import catfish.lvd.models.dist_autoreg_diffusion as dard
-import catfish.lvd.models.dist_utils as du
-import catfish.lvd.shrd_data_loader as sdl
-import catfish.lvd.diffusion_core as dc
+import monkfish.lvd.models.dist_autoreg_diffusion as dard
+import monkfish.lvd.models.dist_utils as du
+import monkfish.lvd.shrd_data_loader as sdl
+import monkfish.lvd.diffusion_core as dc
 
 class DiffARHarness:
     """Sharded Diffusion autoencoder harness"""

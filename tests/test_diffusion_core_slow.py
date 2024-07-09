@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import equinox as eqx
 import optax
 
-import catfish.lvd.diffusion_core as dc
+import monkfish.lvd.diffusion_core as dc
 
 class NeuralModel(eqx.Module):
     layer1: eqx.nn.Linear

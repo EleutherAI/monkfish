@@ -1,7 +1,7 @@
 import os
 import pytest
 from unittest.mock import MagicMock, patch
-import catfish.lvd.shrd_data_loader as sdl
+import monkfish.lvd.shrd_data_loader as sdl
 
 @pytest.fixture
 def mock_dist_manager():

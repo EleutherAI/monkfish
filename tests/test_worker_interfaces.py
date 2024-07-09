@@ -7,7 +7,7 @@ import pytest
 import numpy as np
 import PIL.Image as Image
 import fs.memoryfs
-import catfish.lvd.shrd_data_loader as sdl
+import monkfish.lvd.shrd_data_loader as sdl
 import moviepy.editor
 import mutagen.mp4
 import jax

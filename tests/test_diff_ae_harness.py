@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from unittest.mock import MagicMock, patch, call
-import catfish.lvd.diffusion_ae as dae
+import monkfish.lvd.diffusion_ae as dae
 
 @pytest.fixture
 def mock_cfg():

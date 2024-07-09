@@ -2,7 +2,7 @@ import time
 import pytest
 import multiprocessing
 from unittest.mock import MagicMock, patch
-import catfish.lvd.shrd_data_loader as sdu
+import monkfish.lvd.shrd_data_loader as sdu
 
 @pytest.fixture
 def mock_dist_manager():

@@ -4,12 +4,12 @@ import traceback
 import threading
 import contextvars
 import ray
-import catfish.tpu.ray_tpu as rtpu
+import monkfish.tpu.ray_tpu as rtpu
 import random
 import string
-import catfish.tpu.utils as u
-import catfish.tpu.tpu_constants as tc
-import catfish.tpu.tpu_host_actor as tha
+import monkfish.tpu.utils as u
+import monkfish.tpu.tpu_constants as tc
+import monkfish.tpu.tpu_host_actor as tha
 
 
 def init():

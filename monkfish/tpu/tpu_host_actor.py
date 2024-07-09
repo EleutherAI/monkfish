@@ -1,5 +1,5 @@
 import ray
-import catfish.tpu.utils as u
+import monkfish.tpu.utils as u
 
 class ActorObject(object):
     def __init__(self, obj, **kwargs):

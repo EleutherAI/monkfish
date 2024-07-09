@@ -1,6 +1,6 @@
 import os
 import pytest
-import catfish.lvd.shrd_data_loader as sdl
+import monkfish.lvd.shrd_data_loader as sdl
 
 @pytest.fixture(scope="module")
 def gcs_fs():

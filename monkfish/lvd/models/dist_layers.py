@@ -7,7 +7,7 @@ import jax.sharding as shrd
 import jax.lax as lax
 import equinox as eqx
 
-import catfish.lvd.models.dist_utils as du
+import monkfish.lvd.models.dist_utils as du
 
 #TODO: Subclass eqx.Module properly
 

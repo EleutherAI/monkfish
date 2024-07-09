@@ -4,8 +4,8 @@ import jax.numpy as jnp
 
 import equinox as eqx
 
-import catfish.lvd.models.dist_layers as dl
-import catfish.lvd.models.dist_utils as du
+import monkfish.lvd.models.dist_layers as dl
+import monkfish.lvd.models.dist_utils as du
 
 def test_shrd_mh_attention_save_load(dist_manager, prng_key):
     n_head, d_model, d_qk, d_v = 8, 128, 64, 64
