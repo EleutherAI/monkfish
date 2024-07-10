@@ -7,9 +7,9 @@ set -e
 MINICONDA_PATH="$HOME/miniconda"
 
 # Environment setup
-ENV_NAME="catfish"
+ENV_NAME="monkfish"
 PYTHON_VERSION="3.10"
-MY_PROJECT_DIR="/runtime/catfish"
+MY_PROJECT_DIR="/runtime/monkfish"
 
 # Check if Miniconda is already installed
 if [ ! -d "$MINICONDA_PATH" ]; then
