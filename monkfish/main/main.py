@@ -28,7 +28,8 @@ def parse_args():
     lift_parser.add_argument("input_videos", nargs="+", help="Input video files")
 
     # Training autoregressive diffusion model
-    subparsers.add_parser("train_adm", help="Train the autoregressive diffusion model")
+    train_adm_parser = subparsers.add_parser("train_adm", help="Train the autoregressive diffusion model")
+    train_adm_parser.add_argument("--ckpt", default=None, help="Path to checkpoint to resume training from")
 
     # Reconstructing static test image
     reconstruct_parser = subparsers.add_parser("reconstruct", help="Reconstruct a static test image")

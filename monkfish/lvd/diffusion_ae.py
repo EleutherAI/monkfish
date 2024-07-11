@@ -15,7 +15,6 @@ import monkfish.lvd.models.dist_utils as du
 import monkfish.lvd.shrd_data_loader as sdl
 import monkfish.lvd.diffusion_core as dc
 
-
 DAEModel = collections.namedtuple('DAEModel', ['encoder', 'decoder'])
 
 class DiffAEHarness:

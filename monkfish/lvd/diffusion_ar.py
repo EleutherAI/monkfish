@@ -95,18 +95,11 @@ class DiffARHarness:
         operation = self.args.operation
         dl_conf = self.cfg["transformer_ardm"]["data_loader"]
 
-        if operation == "train_dae":
-            worker_interface_cls = sdl.ImageWorkerInterface
+        if operation == "train_adm":
+            worker_interface_cls = sdl.LatentWorkerInterface
             
             def shard_interface_factory():
-                isi = sdl.ImageShardInterface(self.dist_manager)
-                return isi
-        
-        elif operation == "autoencode":
-            worker_interface_cls = sdl.VideoWorkerInterface
-            
-            def shard_interface_factory():
-                isi = sdl.VideoShardInterface(self.dist_manager)
+                isi = sdl.LatentShardInterface(self.dist_manager)
                 return isi
         else:
             raise ValueError(f"Unsupported operation {operation}")
@@ -147,7 +140,7 @@ class DiffARHarness:
             mlp_dim=model_conf["mlp_dim"],
             qk_dim=model_conf["qk_dim"],
             v_dim=model_conf["v_dim"],
-            n_dim=model_conf["n_dim"]
+            n_head=model_conf["n_head"],
         )
     
     def make_optimizer(self):
