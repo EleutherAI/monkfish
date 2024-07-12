@@ -1,3 +1,6 @@
+import os
+import fs_util
+
 import argparse
 import json
 import multiprocessing
@@ -5,6 +8,7 @@ import multiprocessing
 
 import monkfish.lvd.diffusion_ae as dae
 import monkfish.lvd.diffusion_ar as dar
+import monkfish.lvd.fs_utils as fs_utils
 
 def configure_globals():
     multiprocessing.set_start_method('spawn')
@@ -41,6 +45,16 @@ def parse_args():
     sample_parser.add_argument("--image_prompt", help="Image prompt for sampling")
     sample_parser.add_argument("--video_prompt", help="Video prompt for sampling")
 
+    # Clean dir 
+    clear_dir_parser = subparsers.add_parser("clear_fs", help="Deletes a specified directory")
+    clear_dir_parser.add_argument("--fs_type", type=str, help="file system type")
+    clear_dir_parser.add_argument("--root_dir", type=str, help="root_dir")
+    
+    # List dir 
+    clear_fs_parser = subparsers.add_parser("clear_fs", help="List a specified directory")
+    clear_fs_parser.add_argument("--fs_type", type=str, help="file system type")
+    clear_fs_parser.add_argument("--root_dir", type=str, help="root_dir")
+
     return parser.parse_args()
 
 def read_config(config_path):
@@ -63,6 +77,64 @@ def main():
         reconstruct_image(config, args)
     elif args.operation == "sample":
         sample_video(config, args)
+    elif args.operation == "clear_fs":
+        clear_filesystem(config, args)
+    elif args.operation == "list_fs":
+        list_filesystem(config, args)
+
+def setup_filesystem(config, args):
+    fs_type = args.fs_type
+    root_dir = args.root_dir
+
+    fs_args = {
+        'fs_type': fs_type,
+        'root_path': root_dir,
+        'bucket_name': config['gcp']['gcp_bucket_name'],
+        'credentials_path': config['gcp']['gcp_credentials_path']
+    }
+
+    try:
+        filesystem = fs_utils.fs_initializer(fs_args)
+        return filesystem, fs_type, root_dir
+    except Exception as e:
+        print(f"Error setting up {fs_type} filesystem: {e}")
+        return None, fs_type, root_dir
+
+def clear_filesystem(config, args):
+    filesystem, fs_type, root_dir = setup_filesystem(config, args)
+    if not filesystem:
+        return
+
+    try:
+        if filesystem.exists('/'):
+            filesystem.removetree('/')
+            print(f"Cleared {fs_type} directory: {root_dir}")
+        else:
+            print(f"Directory does not exist: {root_dir}")
+    except Exception as e:
+        print(f"Error clearing {fs_type} directory: {e}")
+
+def list_filesystem(config, args):
+    filesystem, fs_type, root_dir = setup_filesystem(config, args)
+    if not filesystem:
+        return
+
+    def print_dir(path, level=0):
+        indent = ' ' * 4 * level
+        print(f"{indent}{os.path.basename(path) or path}/")
+        for item in filesystem.scandir(path):
+            if item.is_dir:
+                print_dir(item.path, level + 1)
+            else:
+                print(f"{indent}    {item.name}")
+
+    try:
+        if filesystem.exists('/'):
+            print_dir('/')
+        else:
+            print(f"Directory does not exist: {root_dir}")
+    except Exception as e:
+        print(f"Error listing {fs_type} directory: {e}")
 
 def train_diffusion_autoencoder(config, args):
     print(f"Training diffusion autoencoder with config {config} in {args.mode} mode")
