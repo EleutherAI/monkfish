@@ -14,6 +14,7 @@ import monkfish.lvd.models.dist_autoreg_diffusion as dard
 import monkfish.lvd.models.dist_utils as du
 import monkfish.lvd.shrd_data_loader as sdl
 import monkfish.lvd.diffusion_core as dc
+import monkfish.lvd.fs_utils as fs_utils
 
 class DiffARHarness:
     """Sharded Diffusion autoencoder harness"""
@@ -82,9 +83,9 @@ class DiffARHarness:
         ckpt_root_directory = ckpt_conf["ckpt_root_directory"]
         
         if ckpt_fs_type == "local":
-            self.ckpt_fs = sdl.os_filesystem(ckpt_root_directory)
+            self.ckpt_fs = fs_utils.os_filesystem(ckpt_root_directory)
         elif ckpt_fs_type == "gcp":
-            self.ckpt_fs = sdl.gcp_filesystem(
+            self.ckpt_fs = fs_utils.gcp_filesystem(
                 gcp_bucket_name, 
                 root_path=ckpt_root_directory, 
                 gcp_credentials_path=gcp_credentials_path)
