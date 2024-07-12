@@ -18,7 +18,7 @@ def generate_dummy_latent_data(num_samples, latent_dim1, latent_dim2, output_dir
         dummy_data = (dummy_string, dummy_array)
 
         # Save the tuple to a pickle file
-        filename = os.path.join(output_dir, f"latent_sample_{i}.pkl")
+        filename = os.path.join(output_dir, f"{i}.pkl")
         with open(filename, 'wb') as f:
             pickle.dump(dummy_data, f)
 
