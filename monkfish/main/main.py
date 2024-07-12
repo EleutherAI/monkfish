@@ -45,9 +45,11 @@ def parse_args():
     sample_parser.add_argument("--video_prompt", help="Video prompt for sampling")
 
     # Clean dir 
-    clear_dir_parser = subparsers.add_parser("clear_fs", help="Deletes a specified directory")
+    clear_dir_parser = subparsers.add_parser("clear_fs", help="Deletes specified directories")
     clear_dir_parser.add_argument("--fs_type", type=str, help="file system type")
-    clear_dir_parser.add_argument("--root_dir", type=str, help="root_dir")
+    clear_dir_parser.add_argument("--root_dir", type=str, help="root directory")
+    clear_dir_parser.add_argument("--target_dirs", nargs="*", help="list of target directories to clear and remove")
+
     
     # List dir 
     list_fs_parser = subparsers.add_parser("list_fs", help="List a specified directory")
@@ -105,14 +107,29 @@ def clear_filesystem(config, args):
     if not filesystem:
         return
 
+    # New argument for target directories
+    target_dirs = args.target_dirs if hasattr(args, 'target_dirs') else []
+
     try:
         if filesystem.exists('/'):
-            filesystem.removetree('/')
-            print(f"Cleared {fs_type} directory: {root_dir}")
+            if not target_dirs:
+                # If no specific targets, clear everything
+                fs_utils.clear_and_remove_dir(filesystem, '/')
+            else:
+                for target in target_dirs:
+                    # Use '/' as the base, since the filesystem is already rooted at the specified root_dir
+                    full_path = fs.path.combine('/', target)
+                    if filesystem.exists(full_path):
+                        fs_utils.clear_and_remove_dir(filesystem, full_path)
+                        print(f"Cleared and removed directory: {full_path}")
+                    else:
+                        print(f"Directory does not exist: {full_path}")
         else:
-            print(f"Directory does not exist: {root_dir}")
+            print(f"Root directory does not exist: {root_dir}")
     except Exception as e:
-        print(f"Error clearing {fs_type} directory: {e}")
+        print(f"Error clearing {fs_type} filesystem: {e}")
+    finally:
+        filesystem.close()
 
 def list_filesystem(config, args):
     filesystem, fs_type, root_dir = setup_filesystem(config, args)

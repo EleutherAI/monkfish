@@ -48,3 +48,18 @@ def fs_initializer(args):
 
     else:
         raise ValueError(f"Unsupported filesystem type: {fs_type}")
+
+def clear_and_remove_dir(filesystem, path):
+    """Helper function to clear and remove a directory"""
+    if path == '/':
+        # Special handling for root directory
+        for item in filesystem.scandir(path):
+            full_path = fs.path.combine(path, item.name)
+            if filesystem.isdir(full_path):
+                filesystem.removetree(full_path)
+            else:
+                filesystem.remove(full_path)
+        print(f"Cleared root directory: {path}")
+    else:
+        filesystem.removetree(path)
+        print(f"Removed directory: {path}")
