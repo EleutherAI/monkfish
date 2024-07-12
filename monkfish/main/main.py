@@ -1,5 +1,4 @@
-import os
-import fs_util
+import fs
 
 import argparse
 import json
@@ -51,9 +50,10 @@ def parse_args():
     clear_dir_parser.add_argument("--root_dir", type=str, help="root_dir")
     
     # List dir 
-    clear_fs_parser = subparsers.add_parser("clear_fs", help="List a specified directory")
-    clear_fs_parser.add_argument("--fs_type", type=str, help="file system type")
-    clear_fs_parser.add_argument("--root_dir", type=str, help="root_dir")
+    list_fs_parser = subparsers.add_parser("list_fs", help="List a specified directory")
+    list_fs_parser.add_argument("--fs_type", type=str, help="file system type")
+    list_fs_parser.add_argument("--root_dir", type=str, help="root_dir")
+    list_fs_parser.add_argument("--recursive", action="store_true", help="List directories recursively")
 
     return parser.parse_args()
 
@@ -118,19 +118,30 @@ def list_filesystem(config, args):
     filesystem, fs_type, root_dir = setup_filesystem(config, args)
     if not filesystem:
         return
+    
+    print(f"Listing contents of {fs_type} filesystem at {root_dir}")
 
-    def print_dir(path, level=0):
+    def print_dir(path, level=0, recursive=False):
         indent = ' ' * 4 * level
-        print(f"{indent}{os.path.basename(path) or path}/")
-        for item in filesystem.scandir(path):
-            if item.is_dir:
-                print_dir(item.path, level + 1)
-            else:
-                print(f"{indent}    {item.name}")
+        print(f"{indent}{fs.path.basename(path) or path}/")
+        try:
+            for item in filesystem.scandir(path):
+                if item.is_dir:
+                    if recursive:
+                        try:
+                            print_dir(f"{path}/{item.name}", level + 1, recursive)
+                        except fs.errors.ResourceNotFound:
+                            print(f"{indent}    {item.name}/ (inaccessible)")
+                    else:
+                        print(f"{indent}    {item.name}/")
+                else:
+                    print(f"{indent}    {item.name}")
+        except PermissionError:
+            print(f"{indent}    (Permission denied)")
 
     try:
         if filesystem.exists('/'):
-            print_dir('/')
+            print_dir('/', recursive=args.recursive)
         else:
             print(f"Directory does not exist: {root_dir}")
     except Exception as e:
