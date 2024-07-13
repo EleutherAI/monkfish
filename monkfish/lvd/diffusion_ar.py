@@ -203,10 +203,9 @@ class DiffARHarness:
 
     def train(self):
         def loss_fn(model, data, subkey):
-            latents = jax.vmap(model.encoder)(data)
-            diff_data = (latents, data)
+            diff_data = (data, data[1])
             loss = dc.diffusion_loss(
-                model.decoder, diff_data, dc.f_neg_gamma, subkey)
+                model, diff_data, dc.f_neg_gamma, subkey)
             return loss
         
         args = self.args

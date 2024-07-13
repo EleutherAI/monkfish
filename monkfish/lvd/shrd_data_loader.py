@@ -450,6 +450,9 @@ class LatentWorkerInterface:
         with self.fs.open(file_name, 'rb') as latent_file:
             data = pickle.load(latent_file)
         
+        #TODO: actually tokenize input
+        data = np.array([0]),data[1]
+        
         return data, example_id
 
     def list_dir(self):
@@ -474,22 +477,26 @@ class LatentShardInterface:
         self.dist_manager = dist_manager
 
     def host_to_accelerator(self, local_data, batch_size):
-        strings = [item[0][0] for item in local_data]  # Extracting strings
+        tokens = [item[0][0] for item in local_data]  # Extracting tokens vectors
         arrays = [item[0][1] for item in local_data]  # Extracting numpy arrays
         
         # Stack the arrays
-        np_array = np.stack(arrays).astype(np.float32)
+        np_token_data = np.stack(tokens).astype(np.float32)
+        np_array_data = np.stack(arrays).astype(np.float32)
         
         mesh = self.dist_manager.mesh
         p_spec = shrd.PartitionSpec("dp")
         sharding = shrd.NamedSharding(mesh, p_spec)
-        jax_array = jnp.array(np_array)
+        jax_token_data = jnp.array(np_token_data)
+        jax_array_data = jnp.array(np_array_data)
         scatter_fn = self.dist_manager.scatter(sharding, jnp.float32)
-        sharded_array = scatter_fn(jax_array)
+        sharded_token_data = scatter_fn(jax_token_data)
+        sharded_array_data = scatter_fn(jax_array_data)
         
-        return strings, sharded_array
+        return sharded_token_data, sharded_array_data
     
     def accelerator_to_host(self, global_data):
+        #TODO: This is wrong plz redo
         # Assuming global_data is a tuple of (strings, sharded_array)
         strings, sharded_array = global_data
         

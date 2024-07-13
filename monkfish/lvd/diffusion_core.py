@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import jax.tree_util as jtu
 import equinox as eqx
 
 import functools
@@ -18,7 +19,19 @@ def alpha_squared(neg_gamma):
 def diffusion_loss(model, data, f_neg_gamma,  key):
     #As defined in https://arxiv.org/abs/2107.00630 eq. #17 
     x_data, y_data = data
-    assert x_data.shape[0] == y_data.shape[0]
+
+    batch_size = y_data.shape[0]
+    # Check if x_data is a pytree or an array
+    if isinstance(x_data, jnp.ndarray):
+        # If it's an array or a simple container, check its first dimension
+        assert x_data.shape[0] == batch_size, "x_data first dimension doesn't match y_data"
+    else:
+        # If it's a pytree, check the first dimension of each leaf
+        def check_shape(leaf):
+            assert leaf.shape[0] == batch_size, f"Leaf shape {leaf.shape} doesn't match y_data shape {y_data.shape}"
+            return leaf
+        
+        jtu.tree_map(check_shape, x_data)
     
     batch_size = y_data.shape[0]
     
