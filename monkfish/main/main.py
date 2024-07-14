@@ -280,10 +280,22 @@ def sample_video(config, args):
     elif args.video_prompt:
         print(f"Using video prompt: {args.video_prompt}")
 
+    def ardm_harness_factory():
+        return dar.DiffARHarness(args, config)
+
     backend = config.get("backend", "cpu")
     if args.mode == "local":
-        # TODO: Implement local video sampling
-        pass
+        if backend == "tpu":
+            ardm_harness = ardm_harness_factory()
+            generated_video = ardm_harness.sample()
+            print(f"Generated video shape: {generated_video.shape}")
+            # TODO: Implement saving or further processing of the generated video
+        elif backend == "gpu":
+            # TODO: Implement local GPU sampling
+            pass
+        else:
+            # TODO: Implement local CPU sampling
+            pass
     elif args.mode == "distributed":
         # TODO: Implement distributed video sampling
         pass
