@@ -286,10 +286,81 @@ class DiffARHarness:
             print("e")
 
         print("Training completed.")
+    
+    
+def sample(self):
+    args = self.args
+    cfg = self.cfg
 
-    def autoencode(self):
-        args = self.args
-        cfg = self.cfg
+    # Load the latest checkpoint
+    latest_ckpt_path = self.latest_ckpt_path()
+    self.load_checkpoint(latest_ckpt_path)
 
-        latest_ckpt_path = self.latest_ckpt_path()
-        self.load_checkpoint(latest_ckpt_path)
+    # Get sampling configuration
+    sample_cfg = cfg["transformer_ardm"]["sample"]
+    n_steps = sample_cfg.get("n_steps", 100)  # Number of diffusion steps
+    max_seq_len = sample_cfg.get("max_seq_len", 1000)  # Maximum sequence length
+    batch_size = sample_cfg.get("batch_size", 1)  # Number of samples to generate
+    prompt = sample_cfg.get("prompt", None)  # Initial prompt, if any
+
+    # Initialize sequence with prompt or empty
+    if prompt is not None:
+        sequence = jnp.array([prompt] * batch_size)
+    else:
+        sequence = jnp.zeros((batch_size, 0), dtype=jnp.int32)
+
+    model = self.state["model"]
+    key = self.state["prng_key"]
+
+    for _ in range(max_seq_len):
+        key, subkey = jax.random.split(key)
+        
+        # Get the shape for the next token
+        next_token_shape = (model.io_dim,)
+        
+        # Sample the next token using diffusion
+        next_token = dc.sample_diffusion(
+            inputs=sequence,
+            model=model,
+            f_neg_gamma=dc.f_neg_gamma,
+            key=subkey,
+            n_steps=n_steps,
+            shape=next_token_shape
+        )
+        
+        # Convert continuous sample to discrete token (you might need to implement this)
+        next_token_discrete = self.continuous_to_discrete(next_token)
+        
+        # Append the new token to the sequence
+        sequence = jnp.concatenate([sequence, next_token_discrete], axis=1)
+        
+        # Check for end of sequence token (if applicable)
+        if self.is_end_of_sequence(sequence):
+            break
+
+    # Convert tokens to text (you might need to implement this)
+    generated_text = self.tokens_to_text(sequence)
+
+    # Save or print the generated samples
+    self.save_samples(generated_text)
+
+    def continuous_to_discrete(self, continuous_token):
+        # Implement the logic to convert continuous token to discrete
+        # This could be argmax, sampling from a distribution, etc.
+        return jnp.argmax(continuous_token, axis=-1, keepdims=True)
+
+    def is_end_of_sequence(self, sequence):
+        # Implement logic to check if the sequence has reached its end
+        # This could be checking for a specific token, reaching max length, etc.
+        return False  # Placeholder
+
+    def tokens_to_text(self, tokens):
+        # Implement the conversion from token IDs to text
+        # This will depend on your tokenization scheme
+        return tokens  # Placeholder
+
+    def save_samples(self, generated_text):
+        # Implement saving or printing the generated samples
+        print("Generated samples:")
+        for sample in generated_text:
+            print(sample)
