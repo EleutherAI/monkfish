@@ -174,9 +174,11 @@ def test_latent_init(mock_latent_fs):
 def test_latent_get_example(latent_worker):
     data, example_id = latent_worker.get_example(0)
     assert isinstance(data, tuple)
-    assert isinstance(data[0], str)
-    assert isinstance(data[1], np.ndarray)
-    assert data[1].shape == (10, 10)
+    assert len(data) == 2
+    assert isinstance(data[0], np.ndarray)  # Check if the first element is a numpy array
+    assert data[0].shape == (1,)  # Check if it's a 1D array with one element
+    assert isinstance(data[1], np.ndarray)  # Check if the second element is a numpy array
+    assert data[1].shape == (10, 10)  # Check if it has the expected shape
     assert example_id == 0
 
     # Test looping behavior
@@ -184,7 +186,7 @@ def test_latent_get_example(latent_worker):
     assert example_id == 5
     
     first_data = latent_worker.get_example(0)[0]
-    assert data[0] == first_data[0]  # Compare strings
+    np.testing.assert_array_equal(data[0], first_data[0])  # Compare token arrays
     np.testing.assert_array_equal(data[1], first_data[1])  # Compare numpy arrays
 
 def test_latent_list_dir(latent_worker):
