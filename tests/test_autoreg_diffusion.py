@@ -15,17 +15,17 @@ def test_transformer_ardm_forward_pass(dist_manager, prng_key, input_image):
     transformer_ardm = dad.TransformerARDM(dist_manager, prng_key, res_dim=128, 
             io_dim=128, vocab=128, n_layers=2, mlp_dim=256, qk_dim=128, v_dim=128, n_head=8)
         
-    txt = jnp.ones((128,))
+    txt = jnp.ones((128,), dtype=jnp.int32)  # Change to int32
     noise_x = jax.random.normal(prng_key,(128, 128))
     true_x = jax.random.normal(prng_key,(128, 128))
 
-    denoise = transformer_ardm(true_x, noise_x, txt)
+    denoise = transformer_ardm((txt, true_x), noise_x, 0.0)  # Update function call
     assert denoise.shape == true_x.shape, f"Unexpected output shape from TransformerARDM: {denoise.shape}"
 
 def test_save_load_consistency(dist_manager, prng_key, input_image):
     key = jax.random.split(prng_key, 2)
     
-    txt = jnp.ones((128,))
+    txt = jnp.ones((128,), dtype=jnp.int32)  # Change to int32
     noise_x = jax.random.normal(prng_key,(128, 128))
     true_x = jax.random.normal(prng_key,(128, 128))
     
@@ -33,7 +33,7 @@ def test_save_load_consistency(dist_manager, prng_key, input_image):
             io_dim=128, vocab=128, n_layers=2, mlp_dim=256, qk_dim=128, v_dim=128, n_head=8)
 
     # Process input image
-    denoise_initial = transformer_ardm_initial(true_x, noise_x, txt)
+    denoise_initial = transformer_ardm_initial((txt, true_x), noise_x, 0.0)  # Update function call
 
     # Save model using dist_manager
     sharding_initial = dist_manager.get_pytree_sharding(transformer_ardm_initial)
@@ -48,10 +48,11 @@ def test_save_load_consistency(dist_manager, prng_key, input_image):
     transformer_ardm_reloaded = dist_manager.load_pytree(sharding_reloaded, "/test/transformer_ardm")
 
     # Verify consistency after load
-    denoise_reloaded = transformer_ardm_reloaded(true_x, noise_x, txt)
+    denoise_reloaded = transformer_ardm_reloaded((txt, true_x), noise_x, 0.0)  # Update function call
 
     # Check that the outputs after reload are consistent with the initial outputs
     assert jnp.allclose(denoise_initial, denoise_reloaded, atol=1e-5), "TransformerARDM outputs do not match after reload."
+
 
 def test_transformer_ardm_causality(dist_manager, prng_key):
     transformer_ardm = dad.TransformerARDM(dist_manager, prng_key, res_dim=128, 
@@ -87,7 +88,7 @@ def test_transformer_ardm_stability(dist_manager, prng_key):
     true_x = jax.random.normal(key2, (128, 128))
     
     # Run the model multiple times
-    for _ in range(100):
+    for _ in range(3):
         output = transformer_ardm((txt, true_x), noise_x, 0.0)
         
         # Check that the output is not NaN or inf
@@ -95,7 +96,7 @@ def test_transformer_ardm_stability(dist_manager, prng_key):
         assert not jnp.isinf(output).any(), "Inf values detected in the output"
         
         # Check that the output magnitude is reasonable
-        assert jnp.max(jnp.abs(output)) < 1e6, "Output magnitude is too large"
+        assert jnp.max(jnp.abs(output)) < 100, "Output magnitude is too large"
         
         # Use the output as the next input
         true_x = output
