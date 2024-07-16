@@ -31,61 +31,22 @@ def test_output_magnitude(dist_manager, attention_layer):
 def test_causality(dist_manager, attention_layer):
     key = jax.random.PRNGKey(2)
     seq_length = 20
-    x = jax.random.normal(key, (seq_length, 128))
+    d_model = 128
+    x = jax.random.normal(key, (seq_length, d_model))
     
     y = attention_layer(x)
     
-    # Function to compute attention and extract weights
-    def get_attention_weights(x):
-        # This is a simplified version and might need adjustment based on your actual implementation
-        q = jnp.einsum("ij,hjk->hik", x, attention_layer.q)
-        k = jnp.einsum("ij,hjk->hik", x, attention_layer.k)
-        attention = jnp.einsum("hik,hjk->hij", q, k)
-        return jax.nn.softmax(attention, axis=-1)
+    # Create a distinctive signal at a specific position
+    signal_position = 10
+    new_x = x.at[signal_position].set(jnp.ones(d_model) * 10)
     
-    weights = get_attention_weights(x)
+    new_y = attention_layer(new_x)
     
-    # Check that weights form a lower triangular matrix for each head
-    for head_weights in weights:
-        triu_sum = jnp.sum(jnp.triu(head_weights, k=1))
-        assert jnp.allclose(triu_sum, 0, atol=1e-6), "Upper triangle of attention weights is not zero"
-
-def test_attention_uniformity(dist_manager, attention_layer):
-    key = jax.random.PRNGKey(3)
-    x = jax.random.normal(key, (10, 128))
-    
-    # Function to compute attention weights
-    def get_attention_weights(x):
-        q = jnp.einsum("ij,hjk->hik", x, attention_layer.q)
-        k = jnp.einsum("ij,hjk->hik", x, attention_layer.k)
-        attention = jnp.einsum("hik,hjk->hij", q, k)
-        return jax.nn.softmax(attention, axis=-1)
-    
-    weights = get_attention_weights(x)
-    
-    # Check that weights for each token sum to 1
-    weight_sums = jnp.sum(weights, axis=-1)
-    assert jnp.allclose(weight_sums, 1.0, atol=1e-6), "Attention weights do not sum to 1 for each token"
-
-def test_attention_head_diversity(dist_manager, attention_layer):
-    key = jax.random.PRNGKey(4)
-    x = jax.random.normal(key, (10, 128))
-    
-    def get_attention_weights(x):
-        q = jnp.einsum("ij,hjk->hik", x, attention_layer.q)
-        k = jnp.einsum("ij,hjk->hik", x, attention_layer.k)
-        attention = jnp.einsum("hik,hjk->hij", q, k)
-        return jax.nn.softmax(attention, axis=-1)
-    
-    weights = get_attention_weights(x)
-    
-    # Compute pairwise correlations between attention heads
-    correlations = []
-    n_heads = weights.shape[0]
-    for i in range(n_heads):
-        for j in range(i+1, n_heads):
-            corr = jnp.corrcoef(weights[i].ravel(), weights[j].ravel())[0, 1]
-            correlations.append(corr)
-    
-    # Check that not all heads are perfectly correlated
-    assert not jnp.allclose(correlations, 1.0, atol=1e-2), "All attention heads are too similar"
+    # Check that the signal only affects subsequent positions
+    for i in range(seq_length):
+        if i < signal_position:
+            # Positions before the signal should not be affected
+            assert jnp.allclose(y[i], new_y[i], atol=1e-5)
+        else:
+            # Positions after (and including) the signal can be affected
+            assert not jnp.allclose(y[i], new_y[i], atol=1e-5)

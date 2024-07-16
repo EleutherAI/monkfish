@@ -41,14 +41,16 @@ class TransformerARDM(eqx.Module):
 
         h_suffix = (jax.vmap(self.true_x_enc)(true_x) +
             jax.vmap(self.noise_x_enc)(noise_x))
-        h_prefix = jax.vmap(self.txt_enc)(jax.nn.one_hot(txt, vocab))
+        #Scale text input by 1/sqrt(vocab) to normalize input magnitude
+        h_prefix = jax.vmap(self.txt_enc)(jax.nn.one_hot(txt, vocab)*jnp.sqrt(vocab))
         h = jnp.concatenate([h_prefix, h_suffix], axis=0)
         
         #TODO: make neg_gamma_conditionining less hacky
-        h.at[:,0].set(h[:,0] + neg_gamma)
+        h.at[:,0].set(h[:,0] + neg_gamma/10)
 
+        layer_scale = 1/len(self.layers)
         for i in range(1,len(self.layers)):
-            h = self.layers[i](h)
+            h = h + self.layers[i](h)*layer_scale
         
         y = jax.vmap(self.x_decode)(h[len(h_suffix):])
         return y

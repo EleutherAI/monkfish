@@ -32,6 +32,7 @@ class ShrdMHAttention(eqx.Module):
     o: jax.Array
     qk_layer_norm: jax.Array | None
     theta_factor: jax.Array
+    scale: jax.Array = eqx.field(static=True)
     
     def _f_dict(self):
         pre_dict = {
@@ -40,14 +41,16 @@ class ShrdMHAttention(eqx.Module):
             "v": ((("mp","fsdp"), None, None), "v.pkl"),
             "o": ((("mp","fsdp"), None, None), "o.pkl"),
             "qk_layer_norm": ((None,), "qk_layer_norm.pkl"),
-            "theta_factor":((), "theta_factor.pkl")
+            "theta_factor":((), "theta_factor.pkl"),
+            "scale":((), "scale.pkl")
         }
         return make_f_dict(pre_dict, self.dist_manager)
     
     def __init__(self, dist_manager, key, d_model, 
                  n_head, d_qk, d_v, qk_layer_norm=False, theta_factor=10000):
         keys = jax.random.split(key, 6)
-
+    
+        self.scale = 1/jnp.sqrt(n_head*d_v*d_model)
 
         self.dist_manager = dist_manager
 
@@ -118,7 +121,7 @@ class ShrdMHAttention(eqx.Module):
 
         #[pos x d_qk] x [pos x d_qk] -> [pos x pos]
         unmasked_attention = jnp.einsum("ik,jk->ij", rot_qs, rot_ks)
-        masked_attention = unmasked_attention-mask
+        masked_attention = unmasked_attention+mask
         attention_weights = jax.nn.softmax(masked_attention)
 
         #[pos x pos] x [pos x d_v] -> [pos x d_model]
@@ -163,7 +166,7 @@ class ShrdMHAttention(eqx.Module):
     def __call__(self, x):
         seq_length = x.shape[0]  # Get the sequence length
         causal_mask = self._causal_mask(seq_length)  # Create the causal mask for the sequence
-        y = self._mha(x, self.q, self.k, self.v, self.o, causal_mask)
+        y = self._mha(x, self.q, self.k, self.v, self.o, causal_mask)*self.scale
         return y
 
 #TODO: Support dilation
@@ -236,7 +239,7 @@ class ShrdLinear(eqx.Module):
         self.dist_manager = dist_manager
         key1,key2 = jax.random.split(key)
 
-        self.scale = 1/jnp.sqrt(out_dim)
+        self.scale = 1/jnp.sqrt(in_dim)
 
         #Init weight
         shape = (in_dim, out_dim)
@@ -307,7 +310,7 @@ class TransformerBlock(eqx.Module):
         h2 = jax.vmap(self.mlpl1)(h1)
         h3 = jax.vmap(self.mlpl2)(h2)
         h4 = self.attn(h1)
-        y = h3 + h4 + x
+        y = (h3 + h4)#/jnp.sqrt(2)
         return y
         
 

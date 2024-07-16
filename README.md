@@ -11,6 +11,7 @@ This is the training code for a 2 stage autoregressive video model.
 - [x] Multi-platform file backend via PyFilesystem2
 - [ ] GPU Support
 - [ ] SLURM Support
+- [ ] Kubernetes Support
 - [ ] Text conditional diffusion Transformer
 - 6-D parallelism
    - [ ] FSDP
@@ -20,4 +21,10 @@ This is the training code for a 2 stage autoregressive video model.
 - [ ] Llama 3 support
 - [ ] Sophisticated logging (Logfire/SQL database)
 
+# References For Developers
 
+Parameter scaling: [A Spectral Condition for Feature Learning](https://arxiv.org/abs/2310.17813)
+
+Jax sharding: [Using JAX in multi-host and multi-process environments](https://jax.readthedocs.io/en/latest/multi_process.html)
+
+Data loader Design: [Distributed data loading in a multi-host/multi-process environment](https://jax.readthedocs.io/en/latest/distributed_data_loading.html)

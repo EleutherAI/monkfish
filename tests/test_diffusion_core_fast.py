@@ -52,10 +52,10 @@ def test_end_to_end(setup_data, setup_model):
     loss, new_state = dc.update_state(state, data, optimizer, dc.diffusion_loss)
 
     # Test if training reduces loss (very basic check)
-    loss_after, _ = update_state(new_state, data, optimizer, dc.diffusion_loss)
+    loss_after, _ = dc.update_state(new_state, data, optimizer, dc.diffusion_loss)
     assert loss_after < loss
 
     # Test sampling
-    sampled_output = sample_diffusion(x_data, new_state[0], dc.f_neg_gamma, key, n_steps, shape)
+    sampled_output = dc.sample_diffusion(x_data, new_state[0], dc.f_neg_gamma, key, n_steps, shape)
     assert sampled_output.shape == (10, 5)
 
