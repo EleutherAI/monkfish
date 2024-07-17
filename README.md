@@ -23,8 +23,12 @@ This is the training code for a 2 stage autoregressive video model.
 
 # References For Developers
 
-Parameter scaling: [A Spectral Condition for Feature Learning](https://arxiv.org/abs/2310.17813)
+Parameter scaling: 
+ - [A Spectral Condition for Feature Learning](https://arxiv.org/abs/2310.17813)
+ - [Scaling Exponents Across Parameterizations and Optimizers](https://arxiv.org/abs/2407.05872) (NTK init with global LR is used for most experiments)
 
-Jax sharding: [Using JAX in multi-host and multi-process environments](https://jax.readthedocs.io/en/latest/multi_process.html)
+Jax sharding: 
+ - [Using JAX in multi-host and multi-process environments](https://jax.readthedocs.io/en/latest/multi_process.html)
 
-Data loader Design: [Distributed data loading in a multi-host/multi-process environment](https://jax.readthedocs.io/en/latest/distributed_data_loading.html)
+Data loader Design: 
+ - [Distributed data loading in a multi-host/multi-process environment](https://jax.readthedocs.io/en/latest/distributed_data_loading.html)
