@@ -203,7 +203,8 @@ class DiffARHarness:
 
     def train(self):
         def loss_fn(model, data, subkey):
-            diff_data = (data, data[1])
+            txt, true_x = data
+            diff_data = ((txt, true_x), true_x)
             loss = dc.diffusion_loss(
                 model, diff_data, dc.f_neg_gamma, subkey)
             return loss
@@ -233,60 +234,58 @@ class DiffARHarness:
         # Initialize the data downloader
         self.sharded_data_downloader.start(step * self.sharded_data_downloader.batch_size)
 
-        try:
-            total_loss = 0
-            log_start_step = step
-            while step < total_steps:
-                
-                #Save checkpoint 
-                if step % ckpt_freq == 0:
-                    print(f"Saving checkpoint for step {step}...")
-                    ckpt_path = self.ckpt_path(step)
-                    self.save_checkpoint(ckpt_path)
-                
-                step += 1
 
-                if step > 35:
-                    break
+        with jax.default_matmul_precision('bfloat16'):
+            try:
+                total_loss = 0
+                log_start_step = step
+                step_time = time.time()
+                while step < total_steps:
+                    
+                    #Save checkpoint 
+                    if step % ckpt_freq == 0:
+                        print(f"Saving checkpoint for step {step}...")
+                        ckpt_path = self.ckpt_path(step)
+                        self.save_checkpoint(ckpt_path)
+                    
+                    step += 1
+                    
+                    # Get data from the downloader
+                    t1 = time.time()
+                    if (step < 5):
+                        data = self.sharded_data_downloader.step()
+                    t2 = time.time()
 
-                time.sleep(1)
-                
-                # Get data from the downloader
-                data = self.sharded_data_downloader.step()
-                print("a")
+                    # Update the model
+                    loss, self.state = dc.update_state_dict(self.state, data, self.optimizer, loss_fn)
+                    t3 = time.time()
+                    if step % log_freq == 0:
+                        new_time = time.time() 
+                        it_per_s = log_freq/(new_time-step_time)
+                        print((t2-t1)/(t3-t1))
+                        print(t2-t1)
+                        print(t3-t1)
 
-                # Update the model
-                loss, self.state = dc.update_state_dict(self.state, data, self.optimizer, loss_fn)
-                print("b")
-                print(loss)
+                        print(f"Loss for step {step}: {loss:.3f}, It/s: {it_per_s:.1f}, Data Loader Time Frac: {(t2-t1)/(t3-t1):.3f}")
+                        step_time = new_time 
+                    
+                    # Acknowledge that we've processed the data
+                    if (step < 5):
+                        self.sharded_data_downloader.ack()
 
-                """
-                # Accumulate loss
-                total_loss += loss
-
-
-                if step % log_freq == 0:
-                    avg_loss = total_loss / (step - log_start_step)
-                    print(f"Step {step}, Average Loss: {avg_loss:.4f}")
-                    # Reset for next logging interval
-                    total_loss = 0
-                    log_start_step = step
-                """
-                
-                # Acknowledge that we've processed the data
-                self.sharded_data_downloader.ack()
-                print("c")
-
-        except KeyboardInterrupt:
-            print("Training interrupted.")
-        finally:
-            # Always stop the data downloader when we're done
-            print("d")
-            self.sharded_data_downloader.stop()
-            print("e")
+            except KeyboardInterrupt:
+                print("Training interrupted.")
+            finally:
+                # Always stop the data downloader when we're done
+                self.sharded_data_downloader.stop()
+                print("Data downloader stopped.")
 
         print("Training completed.")
+
+        model_conf = self.cfg["transformer_ardm"]["model"]
+        model_conf["io_dim"]
     
+    #TODO: Sample in a non-stupid way
     def sample(self):
         args = self.args
         cfg = self.cfg
@@ -297,44 +296,56 @@ class DiffARHarness:
 
         # Get sampling configuration
         sample_cfg = cfg["transformer_ardm"]["sample"]
-        n_steps = sample_cfg.get("n_steps", 100)  # Number of diffusion steps
-        video_length = sample_cfg.get("video_length", 100)  # Number of frames to generate
-        batch_size = sample_cfg.get("batch_size", 1)  # Number of samples to generate
-        prompt = sample_cfg.get("prompt", None)  # Initial prompt, if any
+        model_conf = self.cfg["transformer_ardm"]["model"]
+        model_conf["io_dim"]
+        n_steps = sample_cfg["n_steps"]  # Number of diffusion steps
+        video_length = sample_cfg["video_length"]  # Number of frames to generate
+        prompt = sample_cfg["prompt"]  # Initial prompt, if any
 
         model = self.state["model"]
         key = self.state["prng_key"]
 
         # Initialize input sequence with prompt or empty
+        # TODO: Properly support multiple prompt styles
         if prompt is not None:
-            input_sequence = jnp.array([prompt] * batch_size)
+            input_txt = jnp.array([prompt])
         else:
-            input_sequence = jnp.zeros((batch_size, 0, model.io_dim))
+            input_txt = jnp.zeros((1,))
+        input_x = jnp.zeros((0, model_conf["io_dim"]))
 
         # Initialize output sequence
-        output_sequence = jnp.zeros((batch_size, 0, model.io_dim))
+        output_sequence = jnp.zeros((0, model_conf["io_dim"]))
 
         for _ in range(video_length):
+            input_data = (input_txt, input_x)
+            
             key, subkey = jax.random.split(key)
             
             # Get the shape for the next token
-            next_token_shape = (model.io_dim,)
+            next_token_shape = (input_x.shape[0]+1, model_conf["io_dim"])
+
+            dummy_vector = jnp.zeros(1, model_conf["io_dim"]) 
+            input_x_ = jnp.concatenate([input_x, dummy_vector], axis=1)
+            input_data = (input_txt, 
+                jnp.concatenate([input_x, dummy_vector], axis=1))
             
             # Sample the next token using diffusion
-            next_token = dc.sample_diffusion(
-                inputs=input_sequence,
+            vector_output = dc.sample_diffusion(
+                inputs=input_data,
                 model=model,
                 f_neg_gamma=dc.f_neg_gamma,
                 key=subkey,
                 n_steps=n_steps,
                 shape=next_token_shape
             )
+            next_vector = vector_output[-1]
             
-            # Append the new token to the output sequence
-            output_sequence = jnp.concatenate([output_sequence, next_token[:, jnp.newaxis, :]], axis=1)
+            # Append the new vector to the output sequence
+            output_sequence = jnp.concatenate([output_sequence, next_vector[jnp.newaxis, :]], axis=1)
             
             # Update input sequence for next iteration
-            input_sequence = jnp.concatenate([input_sequence, next_token[:, jnp.newaxis, :]], axis=1)
+            input_x = jnp.concatenate([input_x, next_vector[jnp.newaxis, :]], axis=1)
+            
             
             # Check for end of sequence condition
             if self.is_end_of_sequence(output_sequence, video_length):
@@ -347,7 +358,7 @@ class DiffARHarness:
 
     def is_end_of_sequence(self, sequence, video_length):
         # Check if the sequence has reached the desired video length
-        return sequence.shape[1] >= video_length
+        return sequence.shape[0] >= video_length
 
     def save_samples(self, generated_sequences):
         # Implement saving or processing the generated samples

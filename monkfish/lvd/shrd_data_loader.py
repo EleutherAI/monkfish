@@ -450,9 +450,6 @@ class LatentWorkerInterface:
         with self.fs.open(file_name, 'rb') as latent_file:
             data = pickle.load(latent_file)
         
-        #TODO: actually tokenize input
-        data = np.array([0]),data[1]
-        
         return data, example_id
 
     def list_dir(self):
@@ -481,8 +478,8 @@ class LatentShardInterface:
         arrays = [item[0][1] for item in local_data]  # Extracting numpy arrays
         
         # Stack the arrays
-        np_token_data = np.stack(tokens).astype(np.float32)
-        np_array_data = np.stack(arrays).astype(np.float32)
+        np_token_data = jnp.stack(tokens)
+        np_array_data = jnp.stack(arrays)
         
         mesh = self.dist_manager.mesh
         p_spec = shrd.PartitionSpec("dp")
