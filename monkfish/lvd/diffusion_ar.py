@@ -102,19 +102,22 @@ class DiffARHarness:
             def shard_interface_factory():
                 isi = sdl.LatentShardInterface(self.dist_manager)
                 return isi
+        if operation == "sample":
+            pass
         else:
             raise ValueError(f"Unsupported operation {operation}")
 
         
-        self.sharded_data_downloader =  sdl.ShardedDataDownloader(
-            self.worker_fs_args,
-            worker_interface_cls,
-            shard_interface_factory,
-            self.dist_manager,
-            workers_per_node=dl_conf["workers_per_node"],
-            batch_size=dl_conf["batch_size"],
-            queue_depth=dl_conf["queue_depth"],
-        )
+        if operation in ["train_adm"]:
+            self.sharded_data_downloader =  sdl.ShardedDataDownloader(
+                self.worker_fs_args,
+                worker_interface_cls,
+                shard_interface_factory,
+                self.dist_manager,
+                workers_per_node=dl_conf["workers_per_node"],
+                batch_size=dl_conf["batch_size"],
+                queue_depth=dl_conf["queue_depth"],
+            )
 
     def init_dist_manager(self):
         dm_cfg = self.cfg["transformer_ardm"]["dist_manager"]
@@ -226,7 +229,7 @@ class DiffARHarness:
             #Load latest checkpoint
             step = self.latest_ckpt_step()
             ckpt_path = self.latest_ckpt_path()
-            #self.load_checkpoint(ckpt_path)
+            self.load_checkpoint(ckpt_path)
         else:
             #Start from scratch and use existing init without loading a checkpoint
             step = 0
@@ -262,9 +265,9 @@ class DiffARHarness:
                     if step % log_freq == 0:
                         new_time = time.time() 
                         it_per_s = log_freq/(new_time-step_time)
-                        print((t2-t1)/(t3-t1))
-                        print(t2-t1)
-                        print(t3-t1)
+                        #print((t2-t1)/(t3-t1))
+                        #print(t2-t1)
+                        #print(t3-t1)
 
                         print(f"Loss for step {step}: {loss:.3f}, It/s: {it_per_s:.1f}, Data Loader Time Frac: {(t2-t1)/(t3-t1):.3f}")
                         step_time = new_time 
@@ -285,7 +288,7 @@ class DiffARHarness:
         model_conf = self.cfg["transformer_ardm"]["model"]
         model_conf["io_dim"]
     
-    #TODO: Sample in a non-stupid way
+    #TODO: Make architecture independent of noise level and implement efficient sampling
     def sample(self):
         args = self.args
         cfg = self.cfg
@@ -299,18 +302,16 @@ class DiffARHarness:
         model_conf = self.cfg["transformer_ardm"]["model"]
         model_conf["io_dim"]
         n_steps = sample_cfg["n_steps"]  # Number of diffusion steps
-        video_length = sample_cfg["video_length"]  # Number of frames to generate
+        video_length = sample_cfg["latent_length"]  # Number of latents to generate
         prompt = sample_cfg["prompt"]  # Initial prompt, if any
 
         model = self.state["model"]
         key = self.state["prng_key"]
+        print("Key:", type(key), key)
 
-        # Initialize input sequence with prompt or empty
-        # TODO: Properly support multiple prompt styles
-        if prompt is not None:
-            input_txt = jnp.array([prompt])
-        else:
-            input_txt = jnp.zeros((1,))
+        # TODO: Properly support multiple prompt formats
+        input_txt = jnp.array([prompt])
+        
         input_x = jnp.zeros((0, model_conf["io_dim"]))
 
         # Initialize output sequence

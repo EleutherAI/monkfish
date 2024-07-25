@@ -427,7 +427,6 @@ class VideoShardInterface:
     def accelerator_to_host(self, global_data):
         pass
 
-
 class LatentWorkerInterface:
     """Interface to Latent data, folder is a dataset, 1 train example per file"""
 
@@ -438,13 +437,8 @@ class LatentWorkerInterface:
             raise ValueError("The directory is empty or contains no pickle files.")
 
     def get_example(self, example_id):
-        """
-        Fetch a latent example, process it, and handle looping through files.
-        `example_id` is used to select the pickle file.
-        Returns a tuple containing the string and numpy array from the pickle file.
-        """
         num_files = len(self.files)
-        file_index = example_id % num_files  # Ensure looping over the files
+        file_index = example_id % num_files
         file_name = self.files[file_index]
         
         with self.fs.open(file_name, 'rb') as latent_file:
@@ -478,14 +472,12 @@ class LatentShardInterface:
         arrays = [item[0][1] for item in local_data]  # Extracting numpy arrays
         
         # Stack the arrays
-        np_token_data = jnp.stack(tokens)
-        np_array_data = jnp.stack(arrays)
+        jax_token_data = jnp.stack(tokens)
+        jax_array_data = jnp.stack(arrays)
         
         mesh = self.dist_manager.mesh
         p_spec = shrd.PartitionSpec("dp")
         sharding = shrd.NamedSharding(mesh, p_spec)
-        jax_token_data = jnp.array(np_token_data)
-        jax_array_data = jnp.array(np_array_data)
         scatter_fn = self.dist_manager.scatter(sharding, jnp.float32)
         sharded_token_data = scatter_fn(jax_token_data)
         sharded_array_data = scatter_fn(jax_array_data)
@@ -493,16 +485,15 @@ class LatentShardInterface:
         return sharded_token_data, sharded_array_data
     
     def accelerator_to_host(self, global_data):
-        #TODO: This is wrong plz redo
-        # Assuming global_data is a tuple of (strings, sharded_array)
-        strings, sharded_array = global_data
+        sharded_token_data, sharded_array_data = global_data
         
-        # Gather the sharded array back to host
+        # Gather the sharded arrays back to host
         gather_fn = self.dist_manager.gather()
-        np_array = np.array(gather_fn(sharded_array))
+        np_token_data = np.array(gather_fn(sharded_token_data))
+        np_array_data = np.array(gather_fn(sharded_array_data))
         
-        # Combine strings and arrays back into the original format
-        local_data = [(s, arr) for s, arr in zip(strings, np_array)]
+        # Combine tokens and arrays back into the original format
+        local_data = [([tokens], array) for tokens, array in zip(np_token_data, np_array_data)]
         
         return local_data
 

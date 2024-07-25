@@ -91,6 +91,70 @@ def test_save_load_pytree(dist_manager, tmp_path):
     assert jnp.allclose(pytree["b"], loaded_pytree["b"])
 
 
+def test_save_load_pytree_2(dist_manager, tmp_path):
+    file_name = str(tmp_path / "test_pytree.pkl")
+    
+    # Create a pytree with various data types
+    pytree = {
+        "float_array": jnp.array([1., 2., 3.]),
+        "int_array": jnp.array([1, 2, 3], dtype=jnp.int32),
+        "bool_array": jnp.array([True, False, True]),
+        "nested": {
+            "float": jnp.array([4., 5., 6.]),
+            "int": jnp.array([4, 5, 6], dtype=jnp.int32)
+        },
+        "scalar_float": jnp.array(3.14),
+        "scalar_int": jnp.array(42, dtype=jnp.int32),
+        "scalar_bool": jnp.array(True)
+    }
+    
+    # Create corresponding sharding pytree
+    sharding_pytree = {
+        "float_array": dist_manager.uniform_sharding,
+        "int_array": dist_manager.uniform_sharding,
+        "bool_array": dist_manager.uniform_sharding,
+        "nested": {
+            "float": dist_manager.uniform_sharding,
+            "int": dist_manager.uniform_sharding
+        },
+        "scalar_float": dist_manager.uniform_sharding,
+        "scalar_int": dist_manager.uniform_sharding,
+        "scalar_bool": dist_manager.uniform_sharding
+    }
+    
+    # Save the pytree
+    dist_manager.save_pytree(pytree, sharding_pytree, file_name)
+    
+    # Load the pytree
+    loaded_pytree = dist_manager.load_pytree(sharding_pytree, file_name)
+    
+    # Verify the structure and contents
+    assert isinstance(loaded_pytree, dict)
+    assert set(loaded_pytree.keys()) == set(pytree.keys())
+    
+    # Check each element
+    assert jnp.allclose(pytree["float_array"], loaded_pytree["float_array"])
+    assert jnp.all(pytree["int_array"] == loaded_pytree["int_array"])
+    assert jnp.all(pytree["bool_array"] == loaded_pytree["bool_array"])
+    
+    assert jnp.allclose(pytree["nested"]["float"], loaded_pytree["nested"]["float"])
+    assert jnp.all(pytree["nested"]["int"] == loaded_pytree["nested"]["int"])
+    
+    assert jnp.isclose(pytree["scalar_float"], loaded_pytree["scalar_float"])
+    assert pytree["scalar_int"] == loaded_pytree["scalar_int"]
+    assert pytree["scalar_bool"] == loaded_pytree["scalar_bool"]
+    
+    # Check dtypes
+    assert loaded_pytree["float_array"].dtype == jnp.float32
+    assert loaded_pytree["int_array"].dtype == jnp.int32
+    assert loaded_pytree["bool_array"].dtype == jnp.bool_
+    assert loaded_pytree["nested"]["float"].dtype == jnp.float32
+    assert loaded_pytree["nested"]["int"].dtype == jnp.int32
+    assert loaded_pytree["scalar_float"].dtype == jnp.float32
+    assert loaded_pytree["scalar_int"].dtype == jnp.int32
+    assert loaded_pytree["scalar_bool"].dtype == jnp.bool_
+
+
 def test_get_pytree_sharding(dist_manager):
     # Create a simple pytree with mixed types
     pytree = {
