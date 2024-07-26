@@ -2,6 +2,7 @@ import os
 import time
 import re
 import collections
+import functools
 
 import fs
 import jax
@@ -102,7 +103,7 @@ class DiffARHarness:
             def shard_interface_factory():
                 isi = sdl.LatentShardInterface(self.dist_manager)
                 return isi
-        if operation == "sample":
+        elif operation == "sample":
             pass
         else:
             raise ValueError(f"Unsupported operation {operation}")
@@ -255,8 +256,7 @@ class DiffARHarness:
                     
                     # Get data from the downloader
                     t1 = time.time()
-                    if (step < 5):
-                        data = self.sharded_data_downloader.step()
+                    data = self.sharded_data_downloader.step()
                     t2 = time.time()
 
                     # Update the model
@@ -273,8 +273,7 @@ class DiffARHarness:
                         step_time = new_time 
                     
                     # Acknowledge that we've processed the data
-                    if (step < 5):
-                        self.sharded_data_downloader.ack()
+                    self.sharded_data_downloader.ack()
 
             except KeyboardInterrupt:
                 print("Training interrupted.")
@@ -293,6 +292,8 @@ class DiffARHarness:
         args = self.args
         cfg = self.cfg
 
+        bs = 1
+
         # Load the latest checkpoint
         latest_ckpt_path = self.latest_ckpt_path()
         self.load_checkpoint(latest_ckpt_path)
@@ -306,40 +307,46 @@ class DiffARHarness:
         prompt = sample_cfg["prompt"]  # Initial prompt, if any
 
         model = self.state["model"]
+        model_f = functools.partial(model, mode="generate")
         key = self.state["prng_key"]
-        print("Key:", type(key), key)
 
         # TODO: Properly support multiple prompt formats
+        # TODO: Support multiple generations
         input_txt = jnp.array([prompt])
         
-        input_x = jnp.zeros((0, model_conf["io_dim"]))
+        input_x = jnp.zeros((bs, 0, model_conf["io_dim"]))
 
         # Initialize output sequence
-        output_sequence = jnp.zeros((0, model_conf["io_dim"]))
+        output_sequence = jnp.zeros((bs, 0, model_conf["io_dim"]))
+
 
         for _ in range(video_length):
-            input_data = (input_txt, input_x)
             
             key, subkey = jax.random.split(key)
             
             # Get the shape for the next token
-            next_token_shape = (input_x.shape[0]+1, model_conf["io_dim"])
+            print("Bla",input_x.shape)
+            next_token_shape = (input_x.shape[1]+1, model_conf["io_dim"])
+            print("NTS",next_token_shape)
 
-            dummy_vector = jnp.zeros(1, model_conf["io_dim"]) 
-            input_x_ = jnp.concatenate([input_x, dummy_vector], axis=1)
-            input_data = (input_txt, 
-                jnp.concatenate([input_x, dummy_vector], axis=1))
+            #dummy_vector = jnp.zeros((1, 1, model_conf["io_dim"])) 
+            #input_data = (input_txt, 
+            #    jnp.concatenate([input_x, dummy_vector], axis=1))
+            
+            input_data = (input_txt, input_x)
+            print("IP0",input_data[0].shape)
+            print("IP1",input_data[1].shape)
             
             # Sample the next token using diffusion
             vector_output = dc.sample_diffusion(
                 inputs=input_data,
-                model=model,
+                model=model_f,
                 f_neg_gamma=dc.f_neg_gamma,
                 key=subkey,
                 n_steps=n_steps,
                 shape=next_token_shape
             )
-            next_vector = vector_output[-1]
+            next_vector = vector_output[:,-1]
             
             # Append the new vector to the output sequence
             output_sequence = jnp.concatenate([output_sequence, next_vector[jnp.newaxis, :]], axis=1)
@@ -347,10 +354,10 @@ class DiffARHarness:
             # Update input sequence for next iteration
             input_x = jnp.concatenate([input_x, next_vector[jnp.newaxis, :]], axis=1)
             
-            
             # Check for end of sequence condition
             if self.is_end_of_sequence(output_sequence, video_length):
                 break
+            print("-----------")
 
         # Save or process the generated samples
         self.save_samples(output_sequence)

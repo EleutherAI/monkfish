@@ -66,7 +66,20 @@ def sample_diffusion(inputs, model, f_neg_gamma, key, n_steps, shape):
     #Following https://arxiv.org/abs/2202.00512 eq. #8
     time_steps = jnp.linspace(0, 1, num=n_steps+1)
 
-    n_samples = inputs.shape[0]
+    # Function to get the first dimension of an array
+    def get_first_dim(x):
+        return x.shape[0]
+
+    # If inputs is a pytree, get the first dimension of the first leaf
+    if isinstance(inputs, jnp.ndarray):
+        n_samples = inputs.shape[0]
+    else:
+        # Get the first dimension of each leaf
+        first_dims = jtu.tree_map(get_first_dim, inputs)
+        # Flatten the tree and get the first value
+        n_samples = jtu.tree_leaves(first_dims)[0]
+        # Check that all leaves have the same first dimension
+        assert all(dim == n_samples for dim in jtu.tree_leaves(first_dims)), "All inputs must have the same first dimension"
 
     z = jax.random.normal(key, (n_samples,) + shape)
     for i in range(n_steps):

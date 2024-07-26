@@ -36,12 +36,19 @@ class TransformerARDM(eqx.Module):
         self.txt_enc = dl.ShrdLinear(dist_manager, keys[-2], vocab, res_dim)
         self.x_decode = dl.ShrdLinear(dist_manager, keys[-1], res_dim, io_dim)
 
-    #([txt_pos] x [x_pos x d_io]) x [(x_pos) x d_io] x [] -> [x_pos x d_io]/[d_io]
-    def __call__(self, data, noise_x, neg_gamma):
+    #Mode == "train"
+    #([txt_pos] x [x_pos x d_io]) x [x_pos x d_io] x [] -> [x_pos x d_io]
+    #Mode == "generate"
+    #([txt_pos] x [x_pos x d_io]) x [(x_pos+1) x d_io] x [] -> [d_io]
+    def __call__(self, data, noise_x, neg_gamma, mode="train"):
+        assert mode in ["train","generate"]
         txt, true_x = data
         
         assert txt.shape[0] >= 1
-        assert noise_x.shape[0] == true_x.shape[0]
+        if mode == "train":
+            assert noise_x.shape[0] == true_x.shape[0]
+        elif mode == "generate":
+            assert noise_x.shape[0] == true_x.shape[0]+1
         
         vocab = self.txt_enc.weight.shape[0]
 
@@ -51,7 +58,13 @@ class TransformerARDM(eqx.Module):
         h_inp = jnp.concatenate([h_prefix, h_suffix], axis=0)
 
         h_noise = jnp.zeros((txt.shape[0] + true_x.shape[0], h_inp.shape[1]))
-        h_noise = h_noise.at[txt.shape[0]-1:-1].set(
+
+        if mode == "train":
+            h_noise_slice = h_noise.at[txt.shape[0]-1:-1]
+        elif mode == "generate":
+            h_noise_slice = h_noise.at[txt.shape[0]-1:]
+
+        h_noise = h_noise_slice.set(
             jax.vmap(self.noise_x_enc)(noise_x))
 
         h = h_noise + h_inp
@@ -63,5 +76,9 @@ class TransformerARDM(eqx.Module):
         for i in range(1,len(self.layers)):
             h = h + self.layers[i](h)*layer_scale
         
-        y = jax.vmap(self.x_decode)(h[txt.shape[0]-1:-1])
-        return y
+        if mode == "train":
+            y = jax.vmap(self.x_decode)(h[txt.shape[0]-1:-1])
+            return y
+        elif mode == "generate":
+            y = jax.vmap(self.x_decode)(h[txt.shape[0]-1:])
+            return y

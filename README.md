@@ -13,7 +13,7 @@ This is the training code for a 2 stage autoregressive video model.
 - [ ] SLURM Support
 - [ ] Kubernetes Support
 - [ ] Text conditional diffusion Transformer
-- 6-D parallelism
+- (5/6)-D parallelism
    - [ ] FSDP
    - [ ] Ring attention
    - [ ] Pipeline parallelism

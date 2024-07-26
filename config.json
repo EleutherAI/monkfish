@@ -69,9 +69,9 @@
         "train": {
             "lr":0.0001,
             "warmup_steps": 1000,
-            "ckpt_freq": 10000,
+            "ckpt_freq": 100,
             "log_freq": 50,
-            "total_steps": 100000
+            "total_steps": 1000
         },
         "sample": {
             "n_steps":20,

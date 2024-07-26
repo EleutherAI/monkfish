@@ -106,7 +106,7 @@ class DistManager:
         return array
     
     def save_pytree(self, pytree, sharding_pytree, file_name):
-        flat_pytree, tree_def = jtu.tree_flatten(pytree)
+        flat_pytree, _ = jtu.tree_flatten(pytree)
         flat_sharding_pytree, _ = jtu.tree_flatten(sharding_pytree)
 
         gathered_leaves = [
@@ -120,16 +120,16 @@ class DistManager:
                 self.fs.makedirs(dir_name, recreate=True)
 
             with self.fs.openbin(file_name, 'w') as blob:
-                blob.write(pkl.dumps((gathered_leaves, tree_def)))
+                blob.write(pkl.dumps(gathered_leaves))
             print(f"Uploaded {file_name} to {type(self.fs).__name__} at {file_name}")
 
         mhu.sync_global_devices("save_pytree_sync")
 
     def load_pytree(self, sharding_pytree, file_name):
         with self.fs.openbin(file_name, 'r') as blob:
-            gathered_leaves, tree_def = pkl.loads(blob.read())
+            gathered_leaves = pkl.loads(blob.read())
 
-        flat_sharding_pytree, _ = jtu.tree_flatten(sharding_pytree)
+        flat_sharding_pytree, tree_def = jtu.tree_flatten(sharding_pytree)
 
         scattered_leaves = [
             self.scatter(sharding, leaf.dtype)(leaf) if leaf is not None else None
@@ -140,7 +140,6 @@ class DistManager:
 
         mhu.sync_global_devices("load_pytree_sync")
         return distributed_pytree
-
 
     def get_pytree_sharding(self, pytree):
         def get_leaf_sharding(leaf):
