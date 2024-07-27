@@ -12,6 +12,8 @@ import jax.experimental.mesh_utils as mesh_utils
 import jax.experimental.shard_map as shard_map
 import jax.sharding as shrd
 
+import numpy as np
+
 import jax.numpy as jnp
 import jax.tree_util as jtu
 
@@ -20,7 +22,9 @@ class DistManager:
         self.pid = jax.process_index()
         self.nodes = jax.process_count()
         self.cpu_device = jax.local_devices(backend="cpu")[0]
-        self.local_accelerators = jax.local_devices()
+        self.local_devices = jax.local_devices()
+        self.local_mesh = shrd.Mesh(self.local_devices, ("local_devices",))
+        self.local_sharding = shrd.NamedSharding(self.local_mesh, shrd.PartitionSpec(("local_devices",)))
 
         self.mesh_shape = mesh_shape
         self.physical_mesh = mesh_utils.create_device_mesh(
@@ -43,6 +47,22 @@ class DistManager:
         prng_f = jax.jit(f, out_shardings=uniform_sharding)
         prng_key = prng_f()
         return prng_key
+    
+    def np_local_to_jax_global_batch(self, local_batch):
+        local_batch_dim = local_batch.shape[0]
+        array_dim = local_batch.shape[1:]
+
+        dp_sharding = shrd.NamedSharding(self.mesh, shrd.PartitionSpec(("dp",)))
+        global_batch_dim = local_batch_dim * jax.device_count()
+        global_shape = (global_batch_dim,) + array_dim
+
+        global_batch = jax.make_array_from_process_local_data(
+            dp_sharding, local_batch, global_shape)
+
+        assert global_batch.shape == global_shape
+        assert global_batch.sharding == dp_sharding
+
+        return global_batch
     
     def sharding(self, partition_spec):
         return shrd.NamedSharding(self.mesh, partition_spec)
