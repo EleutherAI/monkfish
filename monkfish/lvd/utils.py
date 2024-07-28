@@ -14,58 +14,6 @@ import tempfile
 
 import google.cloud.storage as gcs
 
-class StorageHandler:
-    def save(self, data, path):
-        """Save the data to the specified path."""
-        raise NotImplementedError("This method should be overridden.")
-
-    def load(self, path):
-        """Load the data from the specified path."""
-        raise NotImplementedError("This method should be overridden.")
-
-class GCPStorageHandler(StorageHandler):
-    def __init__(self, credentials_path, bucket_name):
-        self.client = gcs.Client.from_service_account_json(credentials_path)
-        self.bucket = self.client.bucket(bucket_name)
-
-    def save(self, data, path):
-        """Save the data to GCP bucket at the specified path."""
-        blob = self.bucket.blob(path)
-        # Serialize data to bytes and upload
-        serialized_data = pickle.dumps(data)
-        blob.upload_from_string(serialized_data)
-
-    def load(self, path):
-        """Load the data from GCP bucket at the specified path."""
-        blob = self.bucket.blob(path)
-        if not blob.exists():
-            raise FileNotFoundError(f"The blob '{path}' does not exist in the GCP bucket.")
-        
-        # Create a temporary file to download blob content
-        _, temp_local_filename = tempfile.mkstemp()
-        try:
-            blob.download_to_filename(temp_local_filename)
-            with open(temp_local_filename, 'rb') as f:
-                return pickle.load(f)
-        finally:
-            os.unlink(temp_local_filename)  # Ensure cleanup of the temporary file
-
-class FileStorageHandler(StorageHandler):
-    def save(self, data, path):
-        directory = os.path.dirname(path)
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-
-        with open(path, 'wb') as f:
-            pickle.dump(data, f)
-
-    def load(self, path):
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"File '{path}' does not exist.")
-
-        with open(path, 'rb') as f:
-            return pickle.load(f)
-
 def ckpt_path(ckpt_dir,iteration, ckpt_type):
     filename = f'checkpoint_{ckpt_type}_{iteration}.pkl'
     ckpt_path = os.path.join(ckpt_dir, filename)
