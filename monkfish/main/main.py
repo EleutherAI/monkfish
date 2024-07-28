@@ -1,4 +1,6 @@
 import fs
+import os
+import time
 
 import argparse
 import json
@@ -8,6 +10,9 @@ import multiprocessing
 import monkfish.lvd.diffusion_ae as dae
 import monkfish.lvd.diffusion_ar as dar
 import monkfish.lvd.fs_utils as fs_utils
+
+import monkfish.tpu as tpu
+import monkfish.tpu.infrastructure as tpu_infra
 
 def configure_globals():
     multiprocessing.set_start_method('spawn')
@@ -189,8 +194,59 @@ def train_diffusion_autoencoder(config, args):
 
     elif args.mode == "distributed":
         if backend == "tpu":
-            # TODO: Implement distributed TPU training
-            pass
+                        # Implement distributed TPU training
+            ssh_key_path = os.path.expanduser(config["tpu"]["ssh_key_path"])
+            tpu_name = config["tpu"]["tpu_name"]
+            tpu_size = config["tpu"]["size"]
+            region = config["tpu"]["region"]
+            preemptible = config["tpu"]["preemptible"]
+
+            head_info, address = tpu_infra.init()
+            print(f"TPU head info: {head_info}")
+
+            tpu_cluster = tpu_infra.TPUCluster(tpu_name, tpu_size, region, 
+                preemptible, ssh_key_path, head_info, address, owner=False)
+            
+            try:
+                n = config["tpu"]["num_cores"]  # Number of TPU cores to use
+                
+                # Put the factory function on the TPU cluster
+                factory_on_tpu = tpu_cluster.put([dae_harness_factory] * n)
+                
+                # Call the factory function on each TPU host to create the harnesses
+                dae_harnesses = factory_on_tpu(args, config)
+                
+                # Put the train method of each harness on the TPU
+                train_func = dae_harnesses.train
+                
+                steps = config["diffusion_auto_encoder"]["train"]["total_steps"]
+                t1 = time.time()
+                for i in range(steps):
+                    try:
+                        r = None
+                        r = train_func()
+                        tpu_cluster.get(r)
+                        
+                        if i % config["diffusion_auto_encoder"]["train"]["ckpt_freq"] == 0:
+                            # Save checkpoint logic here
+                            pass
+                        
+                    except tpu_infra.DeadTPUException as e:
+                        print("TPU failure detected, restarting...")
+                        del train_func
+                        del r
+                        tpu_cluster.restart()
+                        
+                        # Recreate the harnesses after restart
+                        factory_on_tpu = tpu_cluster.put([dae_harness_factory] * n)
+                        dae_harnesses = factory_on_tpu(args, config)
+                        train_func = dae_harnesses.train
+                
+                t2 = time.time()
+                print(f"Training completed. Total time: {t2-t1}, Time per step: {(t2-t1)/steps}")
+                
+            finally:
+                tpu_infra.shutdown()
         elif backend == "gpu":
             # TODO: Implement distributed GPU training
             pass

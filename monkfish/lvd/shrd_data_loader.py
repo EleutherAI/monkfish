@@ -472,28 +472,16 @@ class LatentShardInterface:
         arrays = [item[0][1] for item in local_data]  # Extracting numpy arrays
         
         # Stack the arrays
-        jax_token_data = jnp.stack(tokens)
-        jax_array_data = jnp.stack(arrays)
+        local_np_token_data = np.stack(tokens)
+        local_np_array_data = np.stack(arrays)
         
-        mesh = self.dist_manager.mesh
-        p_spec = shrd.PartitionSpec("dp")
-        sharding = shrd.NamedSharding(mesh, p_spec)
-        scatter_fn = self.dist_manager.scatter(sharding, jnp.float32)
-        sharded_token_data = scatter_fn(jax_token_data)
-        sharded_array_data = scatter_fn(jax_array_data)
+        sharded_token_data = self.dist_manager.np_local_to_jax_global_batch(local_np_token_data)
+        sharded_array_data = self.dist_manager.np_local_to_jax_global_batch(local_np_array_data)
+
+        global_data = sharded_token_data, sharded_array_data
         
-        return sharded_token_data, sharded_array_data
+        return global_data
     
     def accelerator_to_host(self, global_data):
-        sharded_token_data, sharded_array_data = global_data
-        
-        # Gather the sharded arrays back to host
-        gather_fn = self.dist_manager.gather()
-        np_token_data = np.array(gather_fn(sharded_token_data))
-        np_array_data = np.array(gather_fn(sharded_array_data))
-        
-        # Combine tokens and arrays back into the original format
-        local_data = [([tokens], array) for tokens, array in zip(np_token_data, np_array_data)]
-        
-        return local_data
+        pass
 

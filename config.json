@@ -9,7 +9,12 @@
     "cpu":{},
     "gpu": {},
     "tpu":{
-        "tpu_name": "greenland"
+        "tpu_name": "greenland",
+        "ssh_key_path": "~/.ssh/google_compute_engine",
+        "size": "v3-32",
+        "region": "europe-west4-a",
+        "preemptible": true,
+        "num_cores": 32
     },
     "diffusion_auto_encoder":{
         "resolution": [512, 256],
