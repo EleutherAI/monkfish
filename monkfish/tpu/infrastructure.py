@@ -164,6 +164,12 @@ class TPUCluster(object):
                 self._stop_tpu()
         except:
             pass
+    
+    def disconnect(self):
+        try:
+            self._disconnect_tpu()
+        except:
+            pass
 
     def restart(self):
         while True:

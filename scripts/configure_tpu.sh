@@ -46,6 +46,6 @@ conda activate $ENV_NAME
 # Install project dependencies using pip
 echo "Installing project dependencies from $MY_PROJECT_DIR"
 pip install 'jax[tpu]' -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-pip install -e $MY_PROJECT_DIR
+pip install -e $MY_PROJECT_DIR[test]
 
 echo "Setup completed."

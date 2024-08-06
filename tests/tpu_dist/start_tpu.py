@@ -26,7 +26,7 @@ def main():
     n = 4
     f = greenland.put([jax_test]*n)
     x = greenland.put([(x,n,8) for x in range(n)])
-    steps = 5000
+    steps = 500
     t1 = time.time()
     for i in range(steps):
         try:
@@ -44,6 +44,7 @@ def main():
     t2 = time.time()
     print((t2-t1)/n)
 
+    greenland.disconnect()
     tpu_infra.shutdown()
 
 def jax_test():

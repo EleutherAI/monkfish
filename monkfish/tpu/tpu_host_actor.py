@@ -16,7 +16,7 @@ class ActorObject(object):
         return NotImplemented
 
     def __call__(self):
-        return obj
+        return self.obj
 
     def __del__(self):
         pass

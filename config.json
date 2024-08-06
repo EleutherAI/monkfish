@@ -2,8 +2,8 @@
     "seed": 42,
     "backend": "tpu",
     "gcp":{
-        "gcp_credentials_path": "",
-        "gcp_bucket_name": "lvd_test"
+        "gcp_credentials_path": "/runtime/monkfish/service-account-key.json",
+        "gcp_bucket_name": "lvd_data"
     },
     "s3":{},
     "cpu":{},
@@ -55,8 +55,8 @@
             "mesh_shape": [8,1,1]
         },
         "data_loader": {
-            "fs_type": "local",
-            "data_root_directory": "../dummy_latent_data",
+            "fs_type": "gcp",
+            "data_root_directory": "dummy_latent_data",
             "workers_per_node": 16,
             "batch_size": 256,
             "queue_depth": 10
@@ -84,8 +84,8 @@
             "prompt": [0,1,2,3,4,5,6,7]
         },
         "checkpoints": {
-            "fs_type": "local",
-            "ckpt_root_directory": "../checkpoints"
+            "fs_type": "gcp",
+            "ckpt_root_directory": "checkpoints"
         }
     }
 }

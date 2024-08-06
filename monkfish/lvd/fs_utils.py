@@ -4,10 +4,15 @@ import fs_gcsfs
 
 import google.cloud
 import google.oauth2
+import time
 
 def gcp_filesystem(bucket_name, root_path, credentials_path):
+    print(credentials_path)
+    time.sleep(3)
+    """
     if not credentials_path:
         raise ValueError("Credentials path must be provided for authentication.")
+    """
 
     # Load credentials from the service account file
     credentials = google.oauth2.service_account.Credentials.from_service_account_file(credentials_path)

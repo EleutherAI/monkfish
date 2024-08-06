@@ -53,7 +53,7 @@ class DistManager:
         array_dim = local_batch.shape[1:]
 
         dp_sharding = shrd.NamedSharding(self.mesh, shrd.PartitionSpec(("dp",)))
-        global_batch_dim = local_batch_dim * jax.device_count()
+        global_batch_dim = local_batch_dim * jax.process_count()
         global_shape = (global_batch_dim,) + array_dim
 
         global_batch = jax.make_array_from_process_local_data(

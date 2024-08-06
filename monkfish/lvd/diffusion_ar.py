@@ -89,7 +89,7 @@ class DiffARHarness:
             self.ckpt_fs = fs_utils.gcp_filesystem(
                 gcp_bucket_name, 
                 root_path=ckpt_root_directory, 
-                gcp_credentials_path=gcp_credentials_path)
+                credentials_path=gcp_credentials_path)
         else:
             raise Exception(f"Invalid fs_type provided, provided {ckpt_root_directory}")
 
@@ -269,7 +269,17 @@ class DiffARHarness:
                         #print(t2-t1)
                         #print(t3-t1)
 
-                        print(f"Loss for step {step}: {loss:.3f}, It/s: {it_per_s:.1f}, Data Loader Time Frac: {(t2-t1)/(t3-t1):.3f}")
+                        log_object = {
+                            "step": step,
+                            "loss": round(loss, 3),
+                            "iterations_per_second": round(it_per_s, 1),
+                            "data_loader_time_fraction": round((t2-t1)/(t3-t1), 3)
+                        }
+
+                        print(log_object)
+                        
+                        #yield log_object
+
                         step_time = new_time 
                     
                     # Acknowledge that we've processed the data

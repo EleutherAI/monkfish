@@ -79,7 +79,9 @@ def main():
     elif args.operation == "lift":
         lift_videos(config, args)
     elif args.operation == "train_adm":
+        print("A")
         train_autoregressive_diffusion_model(config, args)
+        print("C")
     elif args.operation == "reconstruct":
         reconstruct_image(config, args)
     elif args.operation == "sample":
@@ -182,7 +184,13 @@ def train_diffusion_autoencoder(config, args):
     if args.mode == "local":
         if backend == "tpu":
             dae_harness = dae_harness_factory()
-            dae_harness.train()
+            for log_object in dae_harness.train():
+                # Assuming log_object is a dictionary with keys: step, loss, iterations_per_second, data_loader_time_fraction
+                print(f"Step {log_object['step']}: "
+                      f"Loss: {log_object['loss']:.3f}, "
+                      f"It/s: {log_object['iterations_per_second']:.1f}, "
+                      f"Data Loader Time Frac: {log_object['data_loader_time_fraction']:.3f}")
+                
         elif backend == "gpu":
             # TODO: Implement local GPU training
             raise NotImplementedError()
@@ -194,7 +202,6 @@ def train_diffusion_autoencoder(config, args):
 
     elif args.mode == "distributed":
         if backend == "tpu":
-                        # Implement distributed TPU training
             ssh_key_path = os.path.expanduser(config["tpu"]["ssh_key_path"])
             tpu_name = config["tpu"]["tpu_name"]
             tpu_size = config["tpu"]["size"]
@@ -278,36 +285,103 @@ def lift_videos(config, args):
 def train_autoregressive_diffusion_model(config, args):
     print(f"Training autoregressive diffusion model with config {config} in {args.mode} mode")
 
-    def ardm_harness_factory():
+    def ardm_harness_factory(args, config):
         return dar.DiffARHarness(
             args,
             config
         )
 
-    backend = config.get("backend", "cpu")
+    backend = config["backend"]
     if args.mode == "local":
         if backend == "tpu":
-            ardm_harness = ardm_harness_factory()
-            ardm_harness.train()
+            ardm_harness = ardm_harness_factory(args, config)
+            for log_object in ardm_harness.train():
+                print(f"Step {log_object['step']}: "
+                      f"Loss: {log_object['loss']:.3f}, "
+                      f"It/s: {log_object['iterations_per_second']:.1f}, "
+                      f"Data Loader Time Frac: {log_object['data_loader_time_fraction']:.3f}")
+                
         elif backend == "gpu":
             # TODO: Implement local GPU training
-            pass
-        else:
+            raise NotImplementedError("Local GPU training not implemented for ARDM")
+        elif backend == "cpu":
             # TODO: Implement local CPU training
-            pass
+            raise NotImplementedError("Local CPU training not implemented for ARDM")
+        else:
+            print("Invalid backend")
+
     elif args.mode == "distributed":
         if backend == "tpu":
-            # TODO: Implement distributed TPU training
-            pass
+            # Implement distributed TPU training
+            ssh_key_path = os.path.expanduser(config["tpu"]["ssh_key_path"])
+            tpu_name = config["tpu"]["tpu_name"]
+            tpu_size = config["tpu"]["size"]
+            region = config["tpu"]["region"]
+            preemptible = config["tpu"]["preemptible"]
+
+            head_info, address = tpu_infra.init()
+            print(f"TPU head info: {head_info}")
+
+            tpu_cluster = tpu_infra.TPUCluster(tpu_name, tpu_size, region, 
+                preemptible, ssh_key_path, head_info, address, owner=False)
+            
+            try:
+                #n = config["tpu"]["num_cores"]  # Number of TPU cores to use
+                n = 4 
+                
+                # Put the factory function on the TPU cluster
+                factory_on_tpu = tpu_cluster.put([ardm_harness_factory] * n)
+                args_on_tpu = tpu_cluster.put([args] * n)
+                config_on_tpu = tpu_cluster.put([config] * n)
+                
+                # Call the factory function on each TPU host to create the harnesses
+                ardm_harnesses = factory_on_tpu(args_on_tpu, config_on_tpu)
+                
+                # Put the train method of each harness on the TPU
+                train_func = ardm_harnesses.train
+                
+                steps = config["autoregressive_diffusion_model"]["train"]["total_steps"]
+                t1 = time.time()
+                for i in range(steps):
+                    try:
+                        r = None
+                        r = train_func()
+                        log_object = tpu_cluster.get(r)
+                        
+                        print(f"Step {log_object['step']}: "
+                              f"Loss: {log_object['loss']:.3f}, "
+                              f"It/s: {log_object['iterations_per_second']:.1f}, "
+                              f"Data Loader Time Frac: {log_object['data_loader_time_fraction']:.3f}")
+                        
+                        if i % config["autoregressive_diffusion_model"]["train"]["ckpt_freq"] == 0:
+                            # Save checkpoint logic here
+                            pass
+                        
+                    except tpu_infra.DeadTPUException as e:
+                        print("TPU failure detected, restarting...")
+                        del train_func
+                        del r
+                        tpu_cluster.restart()
+                        
+                        # Recreate the harnesses after restart
+                        factory_on_tpu = tpu_cluster.put([ardm_harness_factory] * n)
+                        ardm_harnesses = factory_on_tpu(args, config)
+                        train_func = ardm_harnesses.train
+                
+                t2 = time.time()
+                print(f"Training completed. Total time: {t2-t1}, Time per step: {(t2-t1)/steps}")
+                
+            finally:
+                tpu_infra.shutdown()
         elif backend == "gpu":
             # TODO: Implement distributed GPU training
-            pass
+            raise NotImplementedError("Distributed GPU training not implemented for ARDM")
         else:
             # TODO: Implement distributed CPU training
-            pass
+            raise NotImplementedError("Distributed CPU training not implemented for ARDM")
     elif args.mode == "swarm":
         # TODO: Implement swarm training
-        pass
+        raise NotImplementedError("Swarm training not implemented for ARDM")
     else:
         print(f"Mode {args.mode} and backend {backend} is not supported for train_adm")
 

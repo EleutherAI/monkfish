@@ -10,7 +10,12 @@ setup(
         "fabric",
         "equinox",
         "optax",
-        "google-cloud-storage"
+        "google-cloud-storage",
+        "fs",
+        "fs-gcsfs",
+        "pillow",
+        "mutagen",
+        "opencv-python-headless"
     ],
     extras_require={
         'test': ['pytest']

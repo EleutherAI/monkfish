@@ -146,8 +146,8 @@ def setup_cluster(conn):
     if project_source_type == "local":
         #add trailing slash if nessesary 
         fabric_copy(conn, project_source, 
-                f"{RUNTIME_ROOT}/catfish")
-        conn.sudo(f"{RUNTIME_ROOT}/catfish/scripts/configure_tpu.sh", hide=True)
+                f"{RUNTIME_ROOT}/monkfish")
+        conn.sudo(f"{RUNTIME_ROOT}/monkfish/scripts/configure_tpu.sh", hide=True)
     else:
         raise NotImplementedError
 
@@ -186,7 +186,7 @@ def start_ray(conn, address, host_id):
     """Start ray on the remote machine"""
     print("A:",address)
     resource_string = f"'{{\"{host_id}\": 1}}'"
-    command = f"/runtime/catfish/scripts/start_ray.sh {address} {resource_string} 50000000000"
+    command = f"/runtime/monkfish/scripts/start_ray.sh {address} {resource_string} 50000000000"
     
     # Execute the command
     conn.sudo(command)
@@ -195,6 +195,6 @@ def stop_ray(conn):
     #TODO: FIX
     try:
         conn.sudo('rm -rf /dev/shm', hide=True)
-        conn.sudo('source ~/.bashrc && conda activate catfish && ray stop -f', hide=True)
+        conn.sudo('source ~/.bashrc && conda activate monkfish && ray stop -f', hide=True)
     except:
         pass
