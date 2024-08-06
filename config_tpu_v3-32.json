@@ -52,7 +52,7 @@
     },
     "transformer_ardm":{
         "dist_manager":{
-            "mesh_shape": [8,1,1]
+            "mesh_shape": [32,1,1]
         },
         "data_loader": {
             "fs_type": "gcp",

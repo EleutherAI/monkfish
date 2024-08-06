@@ -1,0 +1,91 @@
+{
+    "seed": 42,
+    "backend": "tpu",
+    "gcp":{
+        "gcp_credentials_path": "/runtime/monkfish/service-account-key.json",
+        "gcp_bucket_name": "lvd_data"
+    },
+    "s3":{},
+    "cpu":{},
+    "gpu": {},
+    "tpu":{
+        "tpu_name": "greenland",
+        "ssh_key_path": "~/.ssh/google_compute_engine",
+        "size": "v3-32",
+        "region": "europe-west4-a",
+        "preemptible": true,
+        "num_cores": 32
+    },
+    "diffusion_auto_encoder":{
+        "resolution": [512, 256],
+        "dist_manager":{
+            "mesh_shape": [8,1,1]
+        },
+        "data_loader": {
+            "fs_type": "local",
+            "data_root_directory": "../dummy_image_data",
+            "workers_per_node": 1,
+            "batch_size": 32,
+            "queue_depth": 10
+        },
+        "model": {
+            "encoder":{
+                "k":4,
+                "n_layers": 3
+            },
+            "decoder":{
+                "k":5,
+                "n_layers": 3
+            }
+        },
+        "train": {
+            "lr":0.0001,
+            "warmup_steps": 1000,
+            "ckpt_freq": 5,
+            "log_freq": 50,
+            "total_steps": 10000
+        },
+        "checkpoints": {
+            "fs_type": "local",
+            "ckpt_root_directory": "../checkpoints"
+        }
+    },
+    "transformer_ardm":{
+        "dist_manager":{
+            "mesh_shape": [32,1,1]
+        },
+        "data_loader": {
+            "fs_type": "gcp",
+            "data_root_directory": "dummy_latent_data",
+            "workers_per_node": 16,
+            "batch_size": 256,
+            "queue_depth": 10
+        },
+        "model": {
+            "res_dim": 2048,
+            "io_dim": 8,
+            "vocab": 256,
+            "n_layers": 8,
+            "n_head": 8,
+            "mlp_dim": 4096,
+            "qk_dim": 128,
+            "v_dim": 128 
+        },
+        "train": {
+            "lr":0.0001,
+            "warmup_steps": 1000,
+            "ckpt_freq": 100,
+            "log_freq": 50,
+            "total_steps": 1000
+        },
+        "sample": {
+            "n_steps":20,
+            "latent_length":20,
+            "prompt": [0,1,2,3,4,5,6,7]
+        },
+        "checkpoints": {
+            "fs_type": "gcp",
+            "ckpt_root_directory": "checkpoints"
+        }
+    }
+}
