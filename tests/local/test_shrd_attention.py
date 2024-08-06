@@ -3,14 +3,14 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import monkfish.lvd.models.dist_layers as dl
+import monkfish.lvd.models.dist_attn_layers as dal
 import monkfish.lvd.models.dist_utils as du
 
 @pytest.fixture
 def attention_layer(dist_manager):
     n_head, d_model, d_qk, d_v = 8, 128, 64, 64
     key = jax.random.PRNGKey(0)
-    return dl.ShrdMHAttention(dist_manager, key, d_model, n_head, d_qk, d_v)
+    return dal.ShrdMHAttention(dist_manager, key, d_model, n_head, d_qk, d_v)
 
 def test_output_magnitude(dist_manager, attention_layer):
     key = jax.random.PRNGKey(1)

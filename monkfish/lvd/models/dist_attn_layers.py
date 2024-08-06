@@ -6,19 +6,19 @@ import equinox as eqx
 import monkfish.lvd.models.dist_utils as du
 import monkfish.lvd.models.dist_layers as dl
 
-def mha(x, y, q, k, v, o, mask):
-    par_sha = jax.vmap(sha, in_axes=(None, None, 0, 0, 0, None))
+def mha(x, y, q, k, v, o, mask, theta_factor):
+    par_sha = jax.vmap(sha, in_axes=(None, None, 0, 0, 0, None, None))
 
-    z = par_sha(x, y, q, k, v, mask)
+    z = par_sha(x, y, q, k, v, mask, theta_factor)
     output = jnp.einsum("ijk,ikl->jl", z, o)
     return output
 
-def sha(x, y, q, k, v, mask):
+def sha(x, y, q, k, v, mask, theta_factor):
     pre_qs = jnp.einsum("ij,jk->ik", x, q)
-    rot_qs = rope_embed(pre_qs, q.shape[1])
+    rot_qs = rope_embed(pre_qs, q.shape[1], theta_factor)
     
     pre_ks = jnp.einsum("ij,jk->ik", y, k)
-    rot_ks = rope_embed(pre_ks, k.shape[1])
+    rot_ks = rope_embed(pre_ks, k.shape[1], theta_factor)
     
     vs = jnp.einsum("ij,jk->ik", y, v)
 
@@ -116,8 +116,9 @@ class ShrdMHAttention(eqx.Module):
             y = x
         seq_length = x.shape[0]
         mask = causal_mask(seq_length)
-        output = mha(x, y, self.q, self.k, self.v, self.o, mask) * self.scale
+        output = mha(x, y, self.q, self.k, self.v, self.o, mask, self.theta_factor) * self.scale
         return output
+
 
 class TransformerBlock(eqx.Module):
     mlpl1: dl.ShrdLinear
@@ -142,5 +143,49 @@ class TransformerBlock(eqx.Module):
         h2 = jax.vmap(self.mlpl1)(h1)
         h3 = jax.vmap(self.mlpl2)(h2)
         h4 = self.attn(h1, y)
-        output = (h3 + h4)
+        output = (h3 + h4)/2
         return output
+    
+class SplitTransformerBlock(eqx.Module):
+    mlpl1: dl.ShrdLinear
+    mlpl2: dl.ShrdLinear
+    mlpl3: dl.ShrdLinear
+    mlpl4: dl.ShrdLinear
+    self_attn: ShrdMHAttention
+    cross_attn: ShrdMHAttention
+    
+    def __init__(self, dist_manager, key, res_dim, mlp_dim, 
+                 qk_dim, v_dim, n_head):
+        self.mlpl1 = dl.ShrdLinear(dist_manager, key, res_dim, mlp_dim)
+        self.mlpl2 = dl.ShrdLinear(dist_manager, key, mlp_dim, res_dim)
+        self.mlpl3 = dl.ShrdLinear(dist_manager, key, res_dim, mlp_dim)
+        self.mlpl4 = dl.ShrdLinear(dist_manager, key, mlp_dim, res_dim)
+        self.self_attn = ShrdMHAttention(dist_manager, key, res_dim, n_head, qk_dim, v_dim)
+        self.cross_attn = ShrdMHAttention(dist_manager, key, res_dim, n_head, qk_dim, v_dim)
+
+    def _norm(self, x):
+        m = jnp.mean(x, axis=1)
+        s = jnp.std(x, axis=1)
+        y = (x-m[:, jnp.newaxis])/(s[:, jnp.newaxis])
+        return y
+
+    #([pos x res_dim],[pos x res_dim]) -> ([pos x res_dim],[pos x res_dim])
+    def __call__(self, x):
+        i_stream, o_stream = x
+
+        hi1 = self._norm(i_stream)
+        hi2 = jax.vmap(self.mlpl1)(hi1)
+        hi3 = jax.vmap(self.mlpl2)(hi2)
+        hi4 = self.self_attn(hi1, hi1)
+        i_diff = (hi4 + hi3)/2
+        
+        ho1 = self._norm(o_stream)
+        ho2 = jax.vmap(self.mlpl1)(ho1)
+        ho3 = jax.vmap(self.mlpl2)(ho2)
+        ho4 = self.cross_attn(ho1, hi1)
+        o_diff = (ho3 + ho4)/2
+        
+        y = i_diff, o_diff
+        return y
+
+    

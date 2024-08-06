@@ -2,8 +2,8 @@
     "seed": 42,
     "backend": "tpu",
     "gcp":{
-        "gcp_credentials_path": "/runtime/monkfish/service-account-key.json",
-        "gcp_bucket_name": "lvd_data"
+        "gcp_credentials_path": "service-account-key.json",
+        "gcp_bucket_name": "lvd_test"
     },
     "s3":{},
     "cpu":{},
@@ -11,10 +11,10 @@
     "tpu":{
         "tpu_name": "greenland",
         "ssh_key_path": "~/.ssh/google_compute_engine",
-        "size": "v3-32",
+        "size": "v3-8",
         "region": "europe-west4-a",
         "preemptible": true,
-        "num_cores": 32
+        "num_cores": 8 
     },
     "diffusion_auto_encoder":{
         "resolution": [512, 256],
@@ -52,11 +52,11 @@
     },
     "transformer_ardm":{
         "dist_manager":{
-            "mesh_shape": [32,1,1]
+            "mesh_shape": [8,1,1]
         },
         "data_loader": {
-            "fs_type": "gcp",
-            "data_root_directory": "dummy_latent_data",
+            "fs_type": "local",
+            "data_root_directory": "../dummy_latent_data",
             "workers_per_node": 16,
             "batch_size": 256,
             "queue_depth": 10
@@ -84,8 +84,8 @@
             "prompt": [0,1,2,3,4,5,6,7]
         },
         "checkpoints": {
-            "fs_type": "gcp",
-            "ckpt_root_directory": "checkpoints"
+            "fs_type": "local",
+            "ckpt_root_directory": "../checkpoints"
         }
     }
 }
