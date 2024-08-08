@@ -40,7 +40,7 @@ class SplitTransformerARDM(eqx.Module):
     #Mode == "train"
     #([txt_pos] x [x_pos x d_io]) x [x_pos x d_io] x [] -> [x_pos x d_io]
     #Mode == "generate"
-    #([txt_pos] x [x_pos x d_io]) x [(x_pos+1) x d_io] x [] -> [d_io]
+    #([txt_pos] x [x_pos x d_io]) x [(x_pos+1) x d_io] x [] -> [x_pos+1 x d_io]
     def __call__(self, data, noise_x, neg_gamma, mode="train"):
         assert mode in ["train","generate"]
         txt, true_x = data
@@ -71,15 +71,18 @@ class SplitTransformerARDM(eqx.Module):
         h_noise.at[:,0].set(h_noise[:,0] + neg_gamma/10)
         
         h = (h_inp,h_noise)
+        #print("A",h[0][-3:,5],h[1][-3:,5])
         
 
         layer_scale = 1/len(self.layers)
         for i in range(len(self.layers)):
             h_diff = self.layers[i](h)
+            #print("B",h_diff[0][-3:,5],h_diff[1][-3:,5])
             h = (
                 (h[0] + h_diff[0]*layer_scale),
                 (h[1] + h_diff[1]*layer_scale)
             )
+            #print("C",h[0][-3:,5],h[1][-3:,5])
         
         if mode == "train":
             y = jax.vmap(self.x_decode)(h[1][txt.shape[0]-1:-1])
@@ -119,7 +122,7 @@ class TransformerARDM(eqx.Module):
     #Mode == "train"
     #([txt_pos] x [x_pos x d_io]) x [x_pos x d_io] x [] -> [x_pos x d_io]
     #Mode == "generate"
-    #([txt_pos] x [x_pos x d_io]) x [(x_pos+1) x d_io] x [] -> [d_io]
+    #([txt_pos] x [x_pos x d_io]) x [(x_pos+1) x d_io] x [] -> [x_pos+1 x d_io]
     def __call__(self, data, noise_x, neg_gamma, mode="train"):
         assert mode in ["train","generate"]
         txt, true_x = data

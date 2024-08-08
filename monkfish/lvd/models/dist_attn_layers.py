@@ -6,23 +6,29 @@ import equinox as eqx
 import monkfish.lvd.models.dist_utils as du
 import monkfish.lvd.models.dist_layers as dl
 
+
 def mha(x, y, q, k, v, o, mask, theta_factor):
     par_sha = jax.vmap(sha, in_axes=(None, None, 0, 0, 0, None, None))
 
     z = par_sha(x, y, q, k, v, mask, theta_factor)
-    output = jnp.einsum("ijk,ikl->jl", z, o)
+    out_scale = 1/jnp.sqrt(o.shape[0]*o.shape[1])
+    output = jnp.einsum("ijk,ikl->jl", z, o)*out_scale
     return output
 
 def sha(x, y, q, k, v, mask, theta_factor):
-    pre_qs = jnp.einsum("ij,jk->ik", x, q)
+    x_scale = 1/jnp.sqrt(x.shape[1])
+    y_scale = 1/jnp.sqrt(y.shape[1])
+    
+    pre_qs = jnp.einsum("ij,jk->ik", x, q)*x_scale
     rot_qs = rope_embed(pre_qs, q.shape[1], theta_factor)
     
-    pre_ks = jnp.einsum("ij,jk->ik", y, k)
+    pre_ks = jnp.einsum("ij,jk->ik", y, k)*x_scale
     rot_ks = rope_embed(pre_ks, k.shape[1], theta_factor)
     
-    vs = jnp.einsum("ij,jk->ik", y, v)
+    vs = jnp.einsum("ij,jk->ik", y, v)*y_scale
 
-    unmasked_attention = jnp.einsum("ik,jk->ij", rot_qs, rot_ks)
+    attn_scale = 1/jnp.sqrt(rot_qs.shape[1])
+    unmasked_attention = jnp.einsum("ik,jk->ij", rot_qs, rot_ks)*attn_scale
     masked_attention = unmasked_attention + mask
     attention_weights = jax.nn.softmax(masked_attention)
 
@@ -47,7 +53,7 @@ def rope_embed(x, d_qk, theta_factor, qk_layer_norm=None):
     y = jnp.concatenate([y1, y2], axis=1)
     
     if qk_layer_norm is None:
-        y = y / (d_qk ** (1/4))
+        y = y
     else:
         raise NotImplementedError
     
@@ -85,7 +91,7 @@ class ShrdMHAttention(eqx.Module):
                  n_head, d_qk, d_v, qk_layer_norm=False, theta_factor=10000):
         keys = jax.random.split(key, 6)
     
-        self.scale = 1/jnp.sqrt(n_head*d_v*d_model)
+        self.scale = 1
 
         self.dist_manager = dist_manager
 
@@ -127,13 +133,14 @@ class TransformerBlock(eqx.Module):
 
     def __init__(self, dist_manager, key, res_dim, mlp_dim, 
                  qk_dim, v_dim, n_head):
-        self.mlpl1 = dl.ShrdLinear(dist_manager, key, res_dim, mlp_dim)
-        self.mlpl2 = dl.ShrdLinear(dist_manager, key, mlp_dim, res_dim)
-        self.attn = ShrdMHAttention(dist_manager, key, res_dim, n_head, qk_dim, v_dim)
+        keys = jax.random.split(key, 3)
+        self.mlpl1 = dl.ShrdLinear(dist_manager, keys[0], res_dim, mlp_dim)
+        self.mlpl2 = dl.ShrdLinear(dist_manager, key[1], mlp_dim, res_dim)
+        self.attn = ShrdMHAttention(dist_manager, key[2], res_dim, n_head, qk_dim, v_dim)
     
-    def _norm(self, x):
+    def _norm(self, x, eps=1e-3):
         m = jnp.mean(x, axis=1)
-        s = jnp.std(x, axis=1)
+        s = jnp.std(x, axis=1) + eps
         y = (x-m[:, jnp.newaxis])/(s[:, jnp.newaxis])
         return y
     
@@ -156,16 +163,17 @@ class SplitTransformerBlock(eqx.Module):
     
     def __init__(self, dist_manager, key, res_dim, mlp_dim, 
                  qk_dim, v_dim, n_head):
-        self.mlpl1 = dl.ShrdLinear(dist_manager, key, res_dim, mlp_dim)
-        self.mlpl2 = dl.ShrdLinear(dist_manager, key, mlp_dim, res_dim)
-        self.mlpl3 = dl.ShrdLinear(dist_manager, key, res_dim, mlp_dim)
-        self.mlpl4 = dl.ShrdLinear(dist_manager, key, mlp_dim, res_dim)
-        self.self_attn = ShrdMHAttention(dist_manager, key, res_dim, n_head, qk_dim, v_dim)
-        self.cross_attn = ShrdMHAttention(dist_manager, key, res_dim, n_head, qk_dim, v_dim)
+        keys = jax.random.split(key, 6)
+        self.mlpl1 = dl.ShrdLinear(dist_manager, keys[0], res_dim, mlp_dim)
+        self.mlpl2 = dl.ShrdLinear(dist_manager, keys[1], mlp_dim, res_dim)
+        self.mlpl3 = dl.ShrdLinear(dist_manager, keys[2], res_dim, mlp_dim)
+        self.mlpl4 = dl.ShrdLinear(dist_manager, keys[3], mlp_dim, res_dim)
+        self.self_attn = ShrdMHAttention(dist_manager, keys[4], res_dim, n_head, qk_dim, v_dim)
+        self.cross_attn = ShrdMHAttention(dist_manager, keys[5], res_dim, n_head, qk_dim, v_dim)
 
-    def _norm(self, x):
+    def _norm(self, x, eps=1e-3):
         m = jnp.mean(x, axis=1)
-        s = jnp.std(x, axis=1)
+        s = jnp.std(x, axis=1) + eps
         y = (x-m[:, jnp.newaxis])/(s[:, jnp.newaxis])
         return y
 
@@ -182,10 +190,12 @@ class SplitTransformerBlock(eqx.Module):
         ho1 = self._norm(o_stream)
         ho2 = jax.vmap(self.mlpl1)(ho1)
         ho3 = jax.vmap(self.mlpl2)(ho2)
+        #print("x",ho1[-3:,5],hi1[-3:,5])
         ho4 = self.cross_attn(ho1, hi1)
+        #print("y",ho4[-3:,5])
         o_diff = (ho3 + ho4)/2
         
-        y = i_diff, o_diff
+        y = i_diff, o_diff 
         return y
 
     

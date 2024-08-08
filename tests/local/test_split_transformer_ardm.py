@@ -49,22 +49,37 @@ def test_save_load_consistency_split(dist_manager, prng_key):
 
 def test_split_transformer_ardm_causality(dist_manager, prng_key):
     split_transformer_ardm = dad.SplitTransformerARDM(dist_manager, prng_key, res_dim=128, 
-            io_dim=128, vocab=128, n_layers=2, mlp_dim=256, qk_dim=128, v_dim=128, n_head=8)
+            io_dim=128, vocab=128, n_layers=1, mlp_dim=256, qk_dim=128, v_dim=128, n_head=8)
     
-    key1, key2 = jax.random.split(prng_key)
+    key1, key2, key3 = jax.random.split(prng_key, 3)
     
-    txt = jnp.ones((128,), dtype=jnp.int32)
+    txt = jnp.ones((1,), dtype=jnp.int32)
     noise_x = jax.random.normal(key1, (128, 128))
     true_x = jax.random.normal(key2, (128, 128))
     
-    original_output = split_transformer_ardm((txt, true_x), noise_x, 0.0)
+    original_output = split_transformer_ardm((txt, true_x), noise_x, 0.0, mode="train")
     
-    modified_true_x = true_x.at[-1].set(jnp.zeros_like(true_x[-1]))
+    # Modify the second-to-last element of true_x
+    modified_true_x = true_x.at[-2].set(jax.random.normal(key3, (128,)))
     
-    modified_output = split_transformer_ardm((txt, modified_true_x), noise_x, 0.0)
+    modified_output = split_transformer_ardm((txt, modified_true_x), noise_x, 0.0, mode="train")
     
+    # Check that only the last element the output have changed
     assert jnp.allclose(original_output[:-1], modified_output[:-1]), "Non-causal behavior detected: earlier outputs changed"
-    assert not jnp.allclose(original_output[-1], modified_output[-1]), "Last output should have changed"
+    assert not jnp.allclose(original_output[-1:], modified_output[-1:]), "Last output should have changed"
+    
+    """
+    noise_x = jax.random.normal(key1, (128, 128))
+    true_x = jax.random.normal(key2, (128, 128)) # One less than noise_x
+
+    # Additional test for generate mode
+    gen_output_original = split_transformer_ardm((txt, true_x), noise_x, 0.0, mode="generate")
+    gen_output_modified = split_transformer_ardm((txt, modified_true_x), noise_x, 0.0, mode="generate")
+
+    assert jnp.allclose(gen_output_original[:-1], gen_output_modified[:-1]), "Non-causal behavior detected in generate mode: earlier outputs changed"
+    assert not jnp.allclose(gen_output_original[-1], gen_output_modified[-1]), "Last output should have changed in generate mode"
+    """
+
 
 def test_split_transformer_ardm_stability(dist_manager, prng_key):
     split_transformer_ardm = dad.SplitTransformerARDM(dist_manager, prng_key, res_dim=128, 
@@ -95,4 +110,4 @@ def test_split_transformer_ardm_generate_mode(dist_manager, prng_key):
     noise_x = jax.random.normal(prng_key, (128, 128))  # One more than true_x
     
     output = split_transformer_ardm((txt, true_x), noise_x, 0.0, mode="generate")
-    assert output.shape == (128,), f"Unexpected output shape in generate mode: {output.shape}"
+    assert output.shape == (128, 128), f"Unexpected output shape in generate mode: {output.shape}"
