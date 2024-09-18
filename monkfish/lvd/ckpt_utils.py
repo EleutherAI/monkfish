@@ -2,7 +2,7 @@ import fs
 
 import monkfish.lvd.fs_utils as fs_utils
 
-def get_checkpoint_fs(ckpt_fs_type, ckpt_root_directory):
+def get_checkpoint_fs(ckpt_fs_type, ckpt_root_directory, config):
     ckpt_conf = config["transformer_ardm"]["checkpoints"]
     ckpt_fs_type = ckpt_conf["fs_type"]
     ckpt_root_directory = ckpt_conf["ckpt_root_directory"]

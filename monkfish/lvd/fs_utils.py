@@ -7,7 +7,6 @@ import google.oauth2
 import time
 
 def gcp_filesystem(bucket_name, root_path, credentials_path):
-    print(credentials_path)
     time.sleep(3)
     """
     if not credentials_path:

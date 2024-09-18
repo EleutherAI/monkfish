@@ -182,17 +182,15 @@ class SplitTransformerBlock(eqx.Module):
         i_stream, o_stream = x
 
         hi1 = self._norm(i_stream)
-        hi2 = jax.vmap(self.mlpl1)(hi1)
+        hi2 = jax.nn.leaky_relu(jax.vmap(self.mlpl1)(hi1))
         hi3 = jax.vmap(self.mlpl2)(hi2)
         hi4 = self.self_attn(hi1, hi1)
         i_diff = (hi4 + hi3)/2
         
         ho1 = self._norm(o_stream)
-        ho2 = jax.vmap(self.mlpl1)(ho1)
+        ho2 = jax.nn.leaky_relu(jax.vmap(self.mlpl1)(ho1))
         ho3 = jax.vmap(self.mlpl2)(ho2)
-        #print("x",ho1[-3:,5],hi1[-3:,5])
         ho4 = self.cross_attn(ho1, hi1)
-        #print("y",ho4[-3:,5])
         o_diff = (ho3 + ho4)/2
         
         y = i_diff, o_diff 

@@ -68,27 +68,31 @@ class SplitTransformerARDM(eqx.Module):
         h_noise = h_noise_slice.set(
             jax.vmap(self.noise_x_enc)(noise_x))
 
-        h_noise.at[:,0].set(h_noise[:,0] + neg_gamma/10)
+        #TODO: make neg_gamma_conditionining less hacky
+        h_noise = h_noise.at[:,0].set(neg_gamma/10 * jnp.sqrt(h_inp.shape[1]))
+        
+        #Banana for scale
+        #TODO:less hacky
+        h_noise = h_noise.at[:,-1].set(1 * jnp.sqrt(h_inp.shape[1]))
         
         h = (h_inp,h_noise)
-        #print("A",h[0][-3:,5],h[1][-3:,5])
         
 
         layer_scale = 1/len(self.layers)
         for i in range(len(self.layers)):
             h_diff = self.layers[i](h)
-            #print("B",h_diff[0][-3:,5],h_diff[1][-3:,5])
             h = (
                 (h[0] + h_diff[0]*layer_scale),
                 (h[1] + h_diff[1]*layer_scale)
             )
-            #print("C",h[0][-3:,5],h[1][-3:,5])
         
         if mode == "train":
             y = jax.vmap(self.x_decode)(h[1][txt.shape[0]-1:-1])
+            y += noise_x
             return y
         elif mode == "generate":
             y = jax.vmap(self.x_decode)(h[1][txt.shape[0]-1:])
+            y += noise_x
             return y
 
 class TransformerARDM(eqx.Module):

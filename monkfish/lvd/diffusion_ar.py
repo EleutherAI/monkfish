@@ -1,3 +1,34 @@
+"""
+diffusion_ar.py
+
+This module implements a Diffusion Autoregressive (AR) model for video generation using JAX and other related libraries.
+
+The DiffARHarness class serves as the main interface for training and sampling from the model. It handles:
+1. Initialization of file systems for data loading and checkpointing
+2. Distributed training setup
+3. Model creation and optimization
+4. Data loading and preprocessing
+5. Training loop implementation with checkpointing
+6. Sampling from the trained model
+
+Key features:
+- Supports both local and Google Cloud Platform (GCP) file systems
+- Implements a sharded data loader for efficient distributed training
+- Uses a transformer-based architecture for the diffusion model
+- Provides checkpoint management for model saving and loading
+- Implements a sampling procedure for generating video sequences
+
+The module is designed to be flexible and configurable, with most parameters
+specified in a configuration dictionary passed to the DiffARHarness constructor.
+
+Usage:
+- For training: Initialize DiffARHarness with appropriate arguments and call the train() method
+- For sampling: Initialize DiffARHarness, load a checkpoint, and call the sample() method
+
+Note: This implementation is part of a larger project and may require additional
+modules and configurations to run successfully.
+"""
+
 import os
 import time
 import re
@@ -135,7 +166,7 @@ class DiffARHarness:
         
         self.state["prng_key"], model_key = jax.random.split(self.state["prng_key"], 2)
 
-        self.state["model"] = dard.TransformerARDM(
+        self.state["model"] = dard.SplitTransformerARDM(
             self.dist_manager,
             key=model_key,
             res_dim=model_conf["res_dim"],
@@ -153,6 +184,13 @@ class DiffARHarness:
         
         self.optimizer = optax.adam(learning_rate=opt_cfg["lr"])
         self.state["opt_state"] = self.optimizer.init(self.state["model"])
+
+        opt_state = self.optimizer.init(self.state["model"])
+
+        #Counts are on device 0 by default, we scatter to prevent save/load inconsistencies 
+        scattered_count = self.dist_manager.scatter(
+            self.dist_manager.uniform_sharding, jnp.int32)(opt_state[0].count)
+        self.state["opt_state"] = (opt_state[0]._replace(count=scattered_count),) + opt_state[1:]
     
     def list_checkpoints(self):
         """List all checkpoint directories."""
@@ -245,7 +283,6 @@ class DiffARHarness:
                 log_start_step = step
                 step_time = time.time()
                 while step < total_steps:
-                    
                     #Save checkpoint 
                     if step % ckpt_freq == 0:
                         print(f"Saving checkpoint for step {step}...")
@@ -298,7 +335,7 @@ class DiffARHarness:
         model_conf["io_dim"]
     
     #TODO: Make architecture independent of noise level and implement efficient sampling
-    def sample(self):
+    def sample(self, token_prompt, prefix_prompt):
         args = self.args
         cfg = self.cfg
 
@@ -310,42 +347,44 @@ class DiffARHarness:
 
         # Get sampling configuration
         sample_cfg = cfg["transformer_ardm"]["sample"]
-        model_conf = self.cfg["transformer_ardm"]["model"]
-        model_conf["io_dim"]
+        model_cfg = self.cfg["transformer_ardm"]["model"]
+        model_cfg["io_dim"]
         n_steps = sample_cfg["n_steps"]  # Number of diffusion steps
-        video_length = sample_cfg["latent_length"]  # Number of latents to generate
-        prompt = sample_cfg["prompt"]  # Initial prompt, if any
+        latent_length = sample_cfg["latent_length"]  # Number of latents to generate
 
         model = self.state["model"]
         model_f = functools.partial(model, mode="generate")
-        key = self.state["prng_key"]
-
-        # TODO: Properly support multiple prompt formats
-        # TODO: Support multiple generations
-        input_txt = jnp.array([prompt])
+        seed = sample_cfg["seed"]
         
-        input_x = jnp.zeros((bs, 0, model_conf["io_dim"]))
+        # Load prompts across cluster
+        if token_prompt is not None:
+            input_tok_local = jnp.repeat(jnp.array(token_prompt)[None, :], bs, axis=0)
+            # Assert that the first token is bos_token
+            assert input_tok_local[0, 0] == sample_cfg["bos_token"], "The first token must be the bos_token"
+        else:
+            input_tok_local = jnp.array([[sample_cfg["bos_token"]]] * bs)
+
+        if prefix_prompt is not None:
+            input_lat_local = jnp.repeat(jnp.array(prefix_prompt)[None, :, :], bs, axis=0)
+        else:
+            input_lat_local = jnp.zeros((bs, 0, model_cfg["io_dim"]))
+
+        # Create distributed arrays
+        input_tok = jax.make_array_from_process_local_data(self.dist_manager.uniform_sharding, input_tok_local)
+        input_lat = jax.make_array_from_process_local_data(self.dist_manager.uniform_sharding, input_lat_local)
 
         # Initialize output sequence
-        output_sequence = jnp.zeros((bs, 0, model_conf["io_dim"]))
+        key = self.dist_manager.get_key(seed)
+        output_sequence = jnp.zeros((bs, 0, model_cfg["io_dim"]))
 
-
-        for _ in range(video_length):
+        for _ in range(latent_length):
             
             key, subkey = jax.random.split(key)
             
             # Get the shape for the next token
-            print("Bla",input_x.shape)
-            next_token_shape = (input_x.shape[1]+1, model_conf["io_dim"])
-            print("NTS",next_token_shape)
-
-            #dummy_vector = jnp.zeros((1, 1, model_conf["io_dim"])) 
-            #input_data = (input_txt, 
-            #    jnp.concatenate([input_x, dummy_vector], axis=1))
+            next_token_shape = (input_lat.shape[1]+1, model_cfg["io_dim"])
             
-            input_data = (input_txt, input_x)
-            print("IP0",input_data[0].shape)
-            print("IP1",input_data[1].shape)
+            input_data = (input_tok, input_lat)
             
             # Sample the next token using diffusion
             vector_output = dc.sample_diffusion(
@@ -362,17 +401,18 @@ class DiffARHarness:
             output_sequence = jnp.concatenate([output_sequence, next_vector[jnp.newaxis, :]], axis=1)
             
             # Update input sequence for next iteration
-            input_x = jnp.concatenate([input_x, next_vector[jnp.newaxis, :]], axis=1)
+            input_lat = jnp.concatenate([input_lat, next_vector[jnp.newaxis, :]], axis=1)
             
             # Check for end of sequence condition
-            if self.is_end_of_sequence(output_sequence, video_length):
+            if self.is_end_of_sequence(output_sequence, latent_length):
                 break
             print("-----------")
 
-        # Save or process the generated samples
-        self.save_samples(output_sequence)
-
-        return output_sequence
+        # Only return the output sequence if this is the process with rank 0
+        if self.dist_manager.pid == 0:
+            return output_sequence
+        else:
+            return None
 
     def is_end_of_sequence(self, sequence, video_length):
         # Check if the sequence has reached the desired video length

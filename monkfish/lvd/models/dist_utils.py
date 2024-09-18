@@ -112,7 +112,7 @@ class DistManager:
                 blob.write(pkl.dumps(local_array))
             print(f"Uploaded {file_name} to {type(self.fs).__name__} at {file_name}")
         mhu.sync_global_devices("save_sync")
-
+    
     def load_array(self, sharding, file_name):
         with self.fs.openbin(file_name, 'r') as blob:
             local_array_pkl = blob.read()

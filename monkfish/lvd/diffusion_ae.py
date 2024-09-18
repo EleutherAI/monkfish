@@ -267,11 +267,9 @@ class DiffAEHarness:
                 
                 # Get data from the downloader
                 data = self.sharded_data_downloader.step()
-                print("a")
 
                 # Update the model
                 loss, self.state = dc.update_state_dict(self.state, data, self.optimizer, loss_fn)
-                print("b")
                 print(loss)
 
                 """
@@ -289,15 +287,12 @@ class DiffAEHarness:
                 
                 # Acknowledge that we've processed the data
                 self.sharded_data_downloader.ack()
-                print("c")
 
         except KeyboardInterrupt:
             print("Training interrupted.")
         finally:
             # Always stop the data downloader when we're done
-            print("d")
             self.sharded_data_downloader.stop()
-            print("e")
 
         print("Training completed.")
 

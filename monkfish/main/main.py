@@ -14,6 +14,8 @@ import monkfish.lvd.fs_utils as fs_utils
 import monkfish.tpu as tpu
 import monkfish.tpu.infrastructure as tpu_infra
 
+import numpy as np
+
 def configure_globals():
     multiprocessing.set_start_method('spawn')
 
@@ -45,9 +47,9 @@ def parse_args():
 
     # Sampling
     sample_parser = subparsers.add_parser("sample", help="Sample a video using both models")
-    sample_parser.add_argument("--text_prompt", help="Text prompt for sampling")
-    sample_parser.add_argument("--image_prompt", help="Image prompt for sampling")
-    sample_parser.add_argument("--video_prompt", help="Video prompt for sampling")
+    sample_parser.add_argument("--token_prompt_file", help="File containing the token prompt")
+    sample_parser.add_argument("--prefix_prompt_file", help="File containing the prefix prompt")
+    sample_parser.add_argument("--output_file", help="Path to save the generated latent", required=True)
 
     # Clean dir 
     clear_dir_parser = subparsers.add_parser("clear_fs", help="Deletes specified directories")
@@ -79,13 +81,11 @@ def main():
     elif args.operation == "lift":
         lift_videos(config, args)
     elif args.operation == "train_adm":
-        print("A")
         train_autoregressive_diffusion_model(config, args)
-        print("C")
     elif args.operation == "reconstruct":
         reconstruct_image(config, args)
     elif args.operation == "sample":
-        sample_video(config, args)
+        sample_latent(config, args)
     elif args.operation == "clear_fs":
         clear_filesystem(config, args)
     elif args.operation == "list_fs":
@@ -184,12 +184,15 @@ def train_diffusion_autoencoder(config, args):
     if args.mode == "local":
         if backend == "tpu":
             dae_harness = dae_harness_factory()
+            dae_harness.train()
+            """
             for log_object in dae_harness.train():
                 # Assuming log_object is a dictionary with keys: step, loss, iterations_per_second, data_loader_time_fraction
                 print(f"Step {log_object['step']}: "
                       f"Loss: {log_object['loss']:.3f}, "
                       f"It/s: {log_object['iterations_per_second']:.1f}, "
                       f"Data Loader Time Frac: {log_object['data_loader_time_fraction']:.3f}")
+            """
                 
         elif backend == "gpu":
             # TODO: Implement local GPU training
@@ -295,11 +298,14 @@ def train_autoregressive_diffusion_model(config, args):
     if args.mode == "local":
         if backend == "tpu":
             ardm_harness = ardm_harness_factory(args, config)
+            ardm_harness.train()
+            """
             for log_object in ardm_harness.train():
                 print(f"Step {log_object['step']}: "
                       f"Loss: {log_object['loss']:.3f}, "
                       f"It/s: {log_object['iterations_per_second']:.1f}, "
                       f"Data Loader Time Frac: {log_object['data_loader_time_fraction']:.3f}")
+            """
                 
         elif backend == "gpu":
             # TODO: Implement local GPU training
@@ -326,8 +332,7 @@ def train_autoregressive_diffusion_model(config, args):
                 preemptible, ssh_key_path, head_info, address, owner=False)
             
             try:
-                #n = config["tpu"]["num_cores"]  # Number of TPU cores to use
-                n = 4 
+                n = config["tpu"]["num_proc"]  # Number of TPU cores to use
                 
                 # Put the factory function on the TPU cluster
                 factory_on_tpu = tpu_cluster.put([ardm_harness_factory] * n)
@@ -401,14 +406,22 @@ def reconstruct_image(config, args):
     else:
         print(f"Mode {args.mode} is not supported for reconstruct_image")
 
-def sample_video(config, args):
-    print(f"Sampling video with config {config} in {args.mode} mode")
-    if args.text_prompt:
-        print(f"Using text prompt: {args.text_prompt}")
-    elif args.image_prompt:
-        print(f"Using image prompt: {args.image_prompt}")
-    elif args.video_prompt:
-        print(f"Using video prompt: {args.video_prompt}")
+def sample_latent(config, args):
+    print(f"Sampling latent with config {config} in {args.mode} mode")
+    
+    # Read token prompt file if provided
+    token_prompt = None
+    if args.token_prompt_file:
+        with open(args.token_prompt_file, 'r') as f:
+            token_prompt = f.read().strip()
+        print(f"Using token prompt from file: {args.token_prompt_file}")
+
+    # Read prefix prompt file if provided
+    prefix_prompt = None
+    if args.prefix_prompt_file:
+        with open(args.prefix_prompt_file, 'r') as f:
+            prefix_prompt = f.read().strip()
+        print(f"Using prefix prompt from file: {args.prefix_prompt_file}")
 
     def ardm_harness_factory():
         return dar.DiffARHarness(args, config)
@@ -417,23 +430,73 @@ def sample_video(config, args):
     if args.mode == "local":
         if backend == "tpu":
             ardm_harness = ardm_harness_factory()
-            generated_video = ardm_harness.sample()
-            print(f"Generated video shape: {generated_video.shape}")
-            # TODO: Implement saving or further processing of the generated video
-        elif backend == "gpu":
-            # TODO: Implement local GPU sampling
-            pass
-        else:
-            # TODO: Implement local CPU sampling
-            pass
+            generated_latent = ardm_harness.sample(prefix_prompt, token_prompt)
+            print(f"Generated latent shape: {generated_latent.shape}")
+            
+            # Save the generated latent 
+            if args.output_file:
+                print(f"Saving generated latent to {args.output_file}")
+                np.save(args.output_file, generated_latent)
+                print("Latent saved successfully.")
+            else:
+                print("No output file specified. Generated latent was not saved.")
+
     elif args.mode == "distributed":
-        # TODO: Implement distributed video sampling
-        pass
+        if backend == "tpu":
+            # Implementation for distributed TPU sampling
+            ssh_key_path = os.path.expanduser(config["tpu"]["ssh_key_path"])
+            tpu_name = config["tpu"]["tpu_name"]
+            tpu_size = config["tpu"]["size"]
+            region = config["tpu"]["region"]
+            preemptible = config["tpu"]["preemptible"]
+            n_nodes = config["tpu"]["num_nodes"]  # Number of TPU cores to use
+
+            head_info, address = tpu_infra.init()
+            print(f"TPU head info: {head_info}")
+
+            tpu_cluster = tpu_infra.TPUCluster(tpu_name, tpu_size, region, 
+                preemptible, ssh_key_path, head_info, address, owner=False)
+            
+            try:
+                # Put the factory function on the TPU cluster
+                factory_on_tpu = tpu_cluster.put([ardm_harness_factory]*n_nodes)
+
+                #Put the prompt on the TPU cluster
+                prefix_prompt_on_tpu = tpu_cluster.put([prefix_prompt]*n_nodes)
+                token_prompt_on_tpu = tpu_cluster.put([token_prompt]*n_nodes)
+                
+                # Create the harness on the TPU
+                ardm_harness = factory_on_tpu()
+                
+                # Sample on the TPU
+                sample_func = ardm_harness.sample
+
+                generated_latent_on_tpu = sample_func(
+                    prefix_prompt_on_tpu, token_prompt_on_tpu)
+
+                #Get the latent on rank 0
+                generated_latent = tpu_cluster.get(generated_latent_on_tpu)[0]
+                
+                print(f"Generated latent shape: {generated_latent.shape}")
+                
+                # Save the generated latent 
+                if args.output_file:
+                    print(f"Saving generated latent to {args.output_file}")
+                    np.save(args.output_file, generated_latent)
+                    print("Latent saved successfully.")
+                else:
+                    print("No output file specified. Generated latent was not saved.")
+                
+            finally:
+                tpu_infra.shutdown()
+        else:
+            # TODO: Implement distributed sampling for other backends
+            pass
     elif args.mode == "swarm":
         # TODO: Implement swarm video sampling
         pass
     else:
-        print(f"Mode {args.mode} is not supported for sample_video")
+        print(f"Mode {args.mode} is not supported for sample_latent")
 
 if __name__ == "__main__":
     main()
