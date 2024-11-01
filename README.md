@@ -2,24 +2,18 @@
 
 This is the training code for a 2 stage autoregressive video model.
 
-# TODO:
-- [ ] Chunked scatter/gather/init functions
-- [ ] Parallel model save/load
-- [x] Dtype conversions at scatter/gather/init functions
-- [x] Distributed data loading 
-- [ ] Distributed model training
-- [x] Multi-platform file backend via PyFilesystem2
-- [ ] GPU Support
-- [ ] SLURM Support
-- [ ] Kubernetes Support
-- [ ] Text conditional diffusion Transformer
-- (5/6)-D parallelism
-   - [ ] FSDP
-   - [ ] Ring attention
-   - [ ] Pipeline parallelism
-   - [ ] Async swarm
-- [ ] Llama 3 support
-- [ ] Sophisticated logging (Logfire/SQL database)
+# Running on a single TPU
+```
+ python -m monkfish.main.main config.json local [args...]
+```
+
+# Running distributed from a head node:
+```
+ ray start --head --num-cpus=1 --port=6379
+ PROJECT_SOURCE=path/to/monkfish python -m monkfish.main.main config.json distributed [args...]
+ ray stop
+```
+
 
 # References For Developers
 
