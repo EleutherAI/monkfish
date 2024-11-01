@@ -1,6 +1,6 @@
 # Monkfish: Distributed latent video model training on TPUs (and other stuff maybe)
 
-This is the training code for a 2 stage autoregressive video model.
+This is the training code for a 2 stage autoregressive video model. Code works for training latents. 2nd stage is a WIP.
 
 # Running on a single TPU
 ```
