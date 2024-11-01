@@ -5,6 +5,7 @@ from fs_gcsfs import GCSFS
 from google.oauth2 import service_account
 from google.cloud import storage
 
+
 def copy_to_gcs(source_path, bucket_name, target_path, credentials_path):
     # Load credentials from the service account file
     credentials = service_account.Credentials.from_service_account_file(credentials_path)
